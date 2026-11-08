@@ -36,9 +36,12 @@ public class MainActivity extends Activity {
         status.setText("Ready. Internal playback capture requires Android 10+ and the source app must allow capture.");
         root.addView(status);
 
-        addButton(root, "Start internal audio recording", v ->
-            ((MediaProjectionManager)getSystemService(MEDIA_PROJECTION_SERVICE))
-                .createScreenCaptureIntent().also(intent -> startActivityForResult(intent, REQ_CAPTURE)));
+        addButton(root, "Start internal audio recording", v -> {
+            MediaProjectionManager manager =
+                (MediaProjectionManager) getSystemService(MEDIA_PROJECTION_SERVICE);
+            Intent captureIntent = manager.createScreenCaptureIntent();
+            startActivityForResult(captureIntent, REQ_CAPTURE);
+        });
         addButton(root, "Stop recording", v ->
             startService(new Intent(this, CaptureService.class).setAction("STOP")));
 
