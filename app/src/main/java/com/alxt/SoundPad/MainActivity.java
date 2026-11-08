@@ -63,6 +63,7 @@ public class MainActivity extends Activity {
         addButton(root, "Stop playback", v -> stopPlayback());
         addButton(root, "Analyze recording & save voice pitch profile", v -> analyzeAndSaveProfile());
         addButton(root, "Use saved voice pitch profile", v -> applySavedProfile());
+        addButton(root, "Apply warm older-male voice style", v -> applyOlderMaleStyle());
 
         TextView hint = new TextView(this);
         hint.setText("Text to speak:");
@@ -214,8 +215,19 @@ public class MainActivity extends Activity {
         if (tts == null || !ttsReady) return false;
         float factor = Math.max(0.50f, Math.min(2.0f, savedPitch));
         int pitchResult = tts.setPitch(factor);
-        int rateResult = tts.setSpeechRate(1.15f);
+        int rateResult = tts.setSpeechRate(0.84f);
         return pitchResult == TextToSpeech.SUCCESS && rateResult == TextToSpeech.SUCCESS;
+    }
+
+    // A generic older-male presentation preset; this is not a clone of any real person.
+    private void applyOlderMaleStyle() {
+        savedPitch = 0.78f;
+        savedHz = 117.0f;
+        getPreferences(0).edit().putFloat("voice_pitch", savedPitch).putFloat("voice_hz", savedHz).commit();
+        boolean applied = applyPitchToEngine();
+        status.setText(applied
+            ? "Warm older-male style applied: lower pitch and slower pacing. The installed TTS voice still determines the actual voice and accent."
+            : "Preset saved. Initialize or enable a TTS engine in Android settings, then try again.");
     }
 
     private void applySavedProfile() {
