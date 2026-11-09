@@ -22,11 +22,14 @@ import java.util.Locale;
 public class MainActivity extends Activity {
     private static final int REQ_CAPTURE = 8;
     private static final int REQ_RECORD_AUDIO = 9;
+    private static final int REQ_SCREEN_CAPTURE = 10;
     private static final int SAMPLE_RATE = 44100;
 
     private TextToSpeech tts;
     private EditText words;
     private TextView status;
+    private Spinner fpsSpinner;
+    private CheckBox hudToggle;
     private float savedPitch = 1.0f;
     private float savedHz = 150.0f;
     private boolean ttsReady = false;
@@ -53,6 +56,30 @@ public class MainActivity extends Activity {
         status = new TextView(this);
         status.setText("Ready. Internal playback capture requires Android 10+ and the source app must allow capture.");
         root.addView(status);
+
+        TextView screenTitle = new TextView(this);
+        screenTitle.setText("\\nScreen recording");
+        screenTitle.setTextSize(20);
+        root.addView(screenTitle);
+        TextView fpsLabel = new TextView(this);
+        fpsLabel.setText("Recording frame-rate target:");
+        root.addView(fpsLabel);
+        fpsSpinner = new Spinner(this);
+        fpsSpinner.setAdapter(new ArrayAdapter<String>(this, android.R.layout.simple_spinner_dropdown_item,
+            new String[]{"60 FPS", "120 FPS"}));
+        root.addView(fpsSpinner);
+        hudToggle = new CheckBox(this);
+        hudToggle.setText("Show small recording status overlay while recording");
+        hudToggle.setChecked(false);
+        root.addView(hudToggle);
+        addButton(root, "Start screen recording", v -> requestScreenRecording());
+        addButton(root, "Stop screen recording", v -> {
+            startService(new Intent(this, ScreenRecordService.class).setAction("STOP"));
+            status.setText("Stopping screen recording…");
+        });
+        TextView screenNote = new TextView(this);
+        screenNote.setText("Screen recordings are saved as MP4 in SoundPad's Movies folder. 120 FPS is a requested target; Android and the phone's encoder may limit the actual frame rate. The optional overlay is only a recording-status indicator, not an aim-assist.");
+        root.addView(screenNote);
 
         addButton(root, "Start internal audio recording", v -> requestCapturePermission());
         addButton(root, "Stop recording", v -> {
@@ -108,6 +135,20 @@ public class MainActivity extends Activity {
     }
 
     private File recordingFile() { return new File(getFilesDir(), "capture.pcm"); }
+
+    private void requestScreenRecording() {
+        if (hudToggle != null && hudToggle.isChecked() && Build.VERSION.SDK_INT >= 23
+                && !android.provider.Settings.canDrawOverlays(this)) {
+            status.setText("Allow SoundPad to display the optional recording-status overlay, then return and tap Start screen recording again.");
+            Intent settings = new Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                android.net.Uri.parse("package:" + getPackageName()));
+            startActivity(settings);
+            return;
+        }
+        MediaProjectionManager manager = (MediaProjectionManager)getSystemService(Context.MEDIA_PROJECTION_SERVICE);
+        if (manager == null) { status.setText("Screen recording is not supported on this device."); return; }
+        startActivityForResult(manager.createScreenCaptureIntent(), REQ_SCREEN_CAPTURE);
+    }
 
     private void requestCapturePermission() {
         if (Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
@@ -337,7 +378,16 @@ public class MainActivity extends Activity {
 
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
-        if (request == REQ_CAPTURE && result == Activity.RESULT_OK && data != null) {
+        if (request == REQ_SCREEN_CAPTURE && result == Activity.RESULT_OK && data != null) {
+            int fps = fpsSpinner != null && fpsSpinner.getSelectedItemPosition() == 1 ? 120 : 60;
+            Intent service = new Intent(this, ScreenRecordService.class).setAction("START")
+                .putExtra("code", result).putExtra("data", data)
+                .putExtra("fps", fps).putExtra("hud", hudToggle != null && hudToggle.isChecked());
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(service); else startService(service);
+            status.setText("Screen recording started. Requested " + fps + " FPS. Android may cap the actual frame rate.");
+        } else if (request == REQ_SCREEN_CAPTURE) {
+            status.setText("Screen recording permission was cancelled.");
+        } else if (request == REQ_CAPTURE && result == Activity.RESULT_OK && data != null) {
             Intent service = new Intent(this, CaptureService.class).setAction("START")
                 .putExtra("code", result).putExtra("data", data);
             if (Build.VERSION.SDK_INT >= 26) startForegroundService(service); else startService(service);
