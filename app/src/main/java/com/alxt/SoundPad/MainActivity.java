@@ -63,6 +63,8 @@ public class MainActivity extends Activity {
         addButton(root, "Stop playback", v -> stopPlayback());
         addButton(root, "Analyze recording & save voice pitch profile", v -> analyzeAndSaveProfile());
         addButton(root, "Use saved voice pitch profile", v -> applySavedProfile());
+        addButton(root, "Use natural Google-style TTS", v -> applyNaturalGoogleStyle());
+        addButton(root, "Open Android TTS engine & voice settings", v -> openTtsSettings());
         addButton(root, "Apply warm older-male voice style", v -> applyOlderMaleStyle());
 
         TextView hint = new TextView(this);
@@ -74,7 +76,7 @@ public class MainActivity extends Activity {
         words.setGravity(48);
         root.addView(words);
 
-        addButton(root, "Speak with saved profile (fast)", v -> speakText());
+        addButton(root, "Speak text (natural voice)", v -> speakText());
         addButton(root, "Stop speech", v -> { if (tts != null) tts.stop(); });
 
         TextView note = new TextView(this);
@@ -254,7 +256,7 @@ public class MainActivity extends Activity {
         params.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f);
         int result = tts.speak(text, TextToSpeech.QUEUE_FLUSH, params, "soundpad-tts");
         status.setText(result == TextToSpeech.SUCCESS
-            ? String.format(Locale.US, "Speaking with saved TTS pitch %.2fx. The engine may limit the audible effect.", savedPitch)
+            ? String.format(Locale.US, "Speaking with the selected TTS engine at natural pitch and normal speed.", savedPitch)
             : "Could not start speech. Check the device TTS engine.");
     }
 
