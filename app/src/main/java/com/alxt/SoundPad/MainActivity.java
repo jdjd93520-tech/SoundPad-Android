@@ -217,8 +217,28 @@ public class MainActivity extends Activity {
         if (tts == null || !ttsReady) return false;
         float factor = Math.max(0.50f, Math.min(2.0f, savedPitch));
         int pitchResult = tts.setPitch(factor);
-        int rateResult = tts.setSpeechRate(0.84f);
+        int rateResult = tts.setSpeechRate(1.0f);
         return pitchResult == TextToSpeech.SUCCESS && rateResult == TextToSpeech.SUCCESS;
+    }
+
+    // Natural, neutral TTS settings; actual voice comes from the selected Android TTS engine.
+    private void applyNaturalGoogleStyle() {
+        savedPitch = 1.0f;
+        savedHz = 150.0f;
+        getPreferences(0).edit().putFloat("voice_pitch", savedPitch).putFloat("voice_hz", savedHz).commit();
+        boolean applied = applyPitchToEngine();
+        status.setText(applied
+            ? "Natural voice settings applied. For Google's voice, select Speech Recognition & Synthesis from Google in Android TTS settings."
+            : "Natural settings saved. Enable a TTS engine in Android settings, then try again.");
+    }
+
+    private void openTtsSettings() {
+        try {
+            startActivity(new Intent("com.android.settings.TTS_SETTINGS"));
+        } catch (Exception e) {
+            try { startActivity(new Intent("android.settings.SETTINGS")); }
+            catch (Exception ignored) { status.setText("Open Android Settings > Accessibility > Text-to-speech output."); }
+        }
     }
 
     // A generic older-male presentation preset; this is not a clone of any real person.
