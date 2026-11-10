@@ -72,6 +72,7 @@ public class AudioBridgeService extends Service {
         if (PLAY.equals(action) && intent.getData() != null) {
             startForeground(NOTIFICATION_ID, buildNotification("Preparing audio"));
             releasePlayer();
+            preferredOutputDeviceId = intent.getIntExtra(EXTRA_OUTPUT_DEVICE_ID, preferredOutputDeviceId);
             Uri uri = intent.getData();
             try {
                 player = new MediaPlayer();
