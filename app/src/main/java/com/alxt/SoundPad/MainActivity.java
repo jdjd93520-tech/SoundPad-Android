@@ -43,6 +43,10 @@ public class MainActivity extends Activity {
     private volatile boolean playbackRunning = false;
     private volatile AudioTrack playbackTrack;
     private Thread playbackThread;
+    private volatile boolean micMonitorRunning = false;
+    private volatile AudioRecord micMonitorRecorder;
+    private volatile AudioTrack micMonitorTrack;
+    private Thread micMonitorThread;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -135,6 +139,18 @@ public class MainActivity extends Activity {
                 testMicrophoneInput(pendingMicDeviceId);
             }
         });
+        addButton(root, "START MIC INPUT → SYSTEM DEFAULT SPEAKER MONITOR", v -> {
+            int position = inputSpinner.getSelectedItemPosition();
+            int deviceId = position <= 0 || position - 1 >= inputDevices.size() ? 0 : inputDevices.get(position - 1).getId();
+            if (Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                pendingMicDeviceId = deviceId;
+                requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQ_MIC_TEST);
+                status.setText("Grant microphone permission, then press the monitor button again.");
+            } else {
+                startMicMonitor(deviceId);
+            }
+        });
+        addButton(root, "STOP MIC MONITOR", v -> stopMicMonitor());
         addButton(root, "USE ANDROID COMMUNICATION AUDIO MODE", v -> {
             startService(new Intent(this, AudioBridgeService.class).setAction(AudioBridgeService.ROUTE_CALL_AUDIO));
             status.setText("Communication-audio routing requested. Android decides the available route; no virtual mic is created.");
@@ -258,6 +274,76 @@ public class MainActivity extends Activity {
         }
         CharSequence name = device.getProductName();
         return type + (name == null || name.length() == 0 ? "" : " — " + name);
+    }
+
+    private void startMicMonitor(final int deviceId) {
+        stopMicMonitor();
+        micMonitorRunning = true;
+        micMonitorThread = new Thread(() -> {
+            AudioRecord recorder = null;
+            AudioTrack track = null;
+            try {
+                int inputMin = AudioRecord.getMinBufferSize(SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
+                int outputMin = AudioTrack.getMinBufferSize(SAMPLE_RATE, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT);
+                if (inputMin <= 0 || outputMin <= 0) throw new IllegalStateException("This device does not support the required audio format.");
+                recorder = new AudioRecord.Builder()
+                    .setAudioSource(MediaRecorder.AudioSource.DEFAULT)
+                    .setAudioFormat(new AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(SAMPLE_RATE).setChannelMask(AudioFormat.CHANNEL_IN_MONO).build())
+                    .setBufferSizeInBytes(Math.max(inputMin, 8192)).build();
+                if (recorder.getState() != AudioRecord.STATE_INITIALIZED) throw new IllegalStateException("Could not initialize microphone.");
+                if (Build.VERSION.SDK_INT >= 23 && deviceId != 0) {
+                    android.media.AudioManager am = (android.media.AudioManager)getSystemService(AUDIO_SERVICE);
+                    boolean found = false;
+                    if (am != null) for (android.media.AudioDeviceInfo d : am.getDevices(android.media.AudioManager.GET_DEVICES_INPUTS)) {
+                        if (d.getId() == deviceId) { found = recorder.setPreferredDevice(d); break; }
+                    }
+                    if (!found) throw new IllegalStateException("Selected microphone is unavailable or rejected.");
+                }
+                track = new AudioTrack.Builder()
+                    .setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+                    .setAudioFormat(new AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(SAMPLE_RATE).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
+                    .setBufferSizeInBytes(Math.max(outputMin, 8192)).setTransferMode(AudioTrack.MODE_STREAM).build();
+                micMonitorRecorder = recorder;
+                micMonitorTrack = track;
+                recorder.startRecording();
+                track.play();
+                short[] samples = new short[1024];
+                runOnUiThread(() -> status.setText("Live microphone monitor active → Android system-default speaker output. Use headphones to reduce feedback."));
+                while (micMonitorRunning) {
+                    int n = recorder.read(samples, 0, samples.length);
+                    if (n < 0) throw new IllegalStateException("Microphone read failed: " + n);
+                    if (n > 0) {
+                        int offset = 0;
+                        while (micMonitorRunning && offset < n) {
+                            int wrote = track.write(samples, offset, n - offset);
+                            if (wrote < 0) throw new IllegalStateException("Speaker playback failed: " + wrote);
+                            offset += wrote;
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                runOnUiThread(() -> status.setText("Mic monitor stopped: " + e.getMessage()));
+            } finally {
+                micMonitorRunning = false;
+                micMonitorRecorder = null;
+                micMonitorTrack = null;
+                if (recorder != null) { try { recorder.stop(); } catch (Exception ignored) {} recorder.release(); }
+                if (track != null) { try { track.stop(); } catch (Exception ignored) {} track.release(); }
+            }
+        }, "SoundPad-mic-monitor");
+        micMonitorThread.start();
+    }
+
+    private void stopMicMonitor() {
+        micMonitorRunning = false;
+        AudioRecord recorder = micMonitorRecorder;
+        AudioTrack track = micMonitorTrack;
+        if (recorder != null) { try { recorder.stop(); } catch (Exception ignored) {} }
+        if (track != null) { try { track.pause(); track.flush(); } catch (Exception ignored) {} }
+        status.setText("Microphone monitor stopped.");
     }
 
     private void testMicrophoneInput(final int deviceId) {
@@ -599,6 +685,7 @@ public class MainActivity extends Activity {
 
     @Override protected void onDestroy() {
         stopPlayback();
+        stopMicMonitor();
         if (tts != null) { tts.stop(); tts.shutdown(); }
         super.onDestroy();
     }
