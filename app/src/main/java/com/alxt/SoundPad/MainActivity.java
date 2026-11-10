@@ -71,6 +71,10 @@ public class MainActivity extends Activity {
             picker.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
             startActivityForResult(picker, REQ_AUDIO_FILE);
         });
+        addButton(root, "Use Android call-audio route (Bluetooth/headset if supported)", v -> {
+            startService(new Intent(this, AudioBridgeService.class).setAction(AudioBridgeService.ROUTE_CALL_AUDIO));
+            status.setText("Requested Android communication-audio routing. Device support and routing are controlled by Android; this does not create a virtual microphone.");
+        });
         addButton(root, "▶ Play audio in background", v -> {
             if (selectedAudioUri == null) { status.setText("Choose an audio file first."); return; }
             Intent play = new Intent(this, AudioBridgeService.class).setAction(AudioBridgeService.PLAY).setData(selectedAudioUri);
@@ -81,7 +85,7 @@ public class MainActivity extends Activity {
         addButton(root, "Resume Audio Bridge", v -> startService(new Intent(this, AudioBridgeService.class).setAction(AudioBridgeService.RESUME)));
         addButton(root, "Stop Audio Bridge", v -> startService(new Intent(this, AudioBridgeService.class).setAction(AudioBridgeService.STOP)));
         TextView bridgeNote = new TextView(this);
-        bridgeNote.setText("No-root Android limitation: this plays sound through the selected phone/Bluetooth output and continues in the background. Android does not let ordinary apps expose that playback as a virtual microphone to a game or another app. Internal playback capture is separate and only works when the source app permits it.");
+        bridgeNote.setText("No-root Android limitation: the optional call-audio mode requests Android communication routing (which may use a supported Bluetooth/headset route). This can help compatible external loopback setups, but it does not create a virtual microphone or inject playback into another app. Actual mic input still requires a physical/compatible audio input path and Android permission. Internal playback capture is separate and only works when the source app permits it.");
         root.addView(bridgeNote);
 
         TextView screenTitle = new TextView(this);
