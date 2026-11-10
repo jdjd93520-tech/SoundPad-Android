@@ -8,6 +8,8 @@ import android.content.pm.PackageManager;
 import android.media.AudioAttributes;
 import android.media.AudioFormat;
 import android.media.AudioTrack;
+import android.media.AudioRecord;
+import android.media.MediaRecorder;
 import android.net.Uri;
 import android.media.projection.MediaProjectionManager;
 import android.os.Build;
@@ -25,6 +27,8 @@ public class MainActivity extends Activity {
     private static final int REQ_RECORD_AUDIO = 9;
     private static final int REQ_SCREEN_CAPTURE = 10;
     private static final int REQ_AUDIO_FILE = 11;
+    private static final int REQ_MIC_TEST = 12;
+    private int pendingMicDeviceId = 0;
     private Uri selectedAudioUri;
     private static final int SAMPLE_RATE = 44100;
 
@@ -67,6 +71,9 @@ public class MainActivity extends Activity {
         TextView routeHint = new TextView(this);
         routeHint.setText("Choose where SoundPad plays audio. Available routes depend on your phone and connected devices:");
         root.addView(routeHint);
+        TextView outputLabel = new TextView(this);
+        outputLabel.setText("PLAYBACK OUTPUT (speaker / headset / Bluetooth / USB)");
+        root.addView(outputLabel);
         Spinner outputSpinner = new Spinner(this);
         root.addView(outputSpinner);
         java.util.ArrayList<android.media.AudioDeviceInfo> outputDevices = new java.util.ArrayList<>();
@@ -80,7 +87,19 @@ public class MainActivity extends Activity {
             }
         }
         outputSpinner.setAdapter(new ArrayAdapter<String>(this, android.R.layout.simple_spinner_dropdown_item, outputLabels));
-        addButton(root, "Refresh available audio outputs", v -> {
+
+        TextView inputLabel = new TextView(this);
+        inputLabel.setText("MICROPHONE INPUT (recording source — not a playback output)");
+        root.addView(inputLabel);
+        Spinner inputSpinner = new Spinner(this);
+        root.addView(inputSpinner);
+        java.util.ArrayList<android.media.AudioDeviceInfo> inputDevices = new java.util.ArrayList<>();
+        java.util.ArrayList<String> inputLabels = new java.util.ArrayList<>();
+        inputLabels.add("Android default microphone");
+        refreshInputDevices(inputDevices, inputLabels);
+        inputSpinner.setAdapter(new ArrayAdapter<String>(this, android.R.layout.simple_spinner_dropdown_item, inputLabels));
+
+        addButton(root, "REFRESH ALL AUDIO DEVICES", v -> {
             outputDevices.clear();
             outputLabels.clear();
             outputLabels.add("System default output");
@@ -92,40 +111,57 @@ public class MainActivity extends Activity {
                 }
             }
             outputSpinner.setAdapter(new ArrayAdapter<String>(this, android.R.layout.simple_spinner_dropdown_item, outputLabels));
-            status.setText("Output list refreshed. Connect Bluetooth, wired or USB audio first if you want it listed.");
+            inputDevices.clear();
+            inputLabels.clear();
+            inputLabels.add("Android default microphone");
+            refreshInputDevices(inputDevices, inputLabels);
+            inputSpinner.setAdapter(new ArrayAdapter<String>(this, android.R.layout.simple_spinner_dropdown_item, inputLabels));
+            status.setText("Audio devices refreshed. Connect your headset or Bluetooth/USB device first.");
         });
-        addButton(root, "Apply selected audio output", v -> {
+        addButton(root, "APPLY PLAYBACK OUTPUT", v -> {
             int position = outputSpinner.getSelectedItemPosition();
             int deviceId = position <= 0 || position - 1 >= outputDevices.size() ? 0 : outputDevices.get(position - 1).getId();
             Intent route = new Intent(this, AudioBridgeService.class).setAction(AudioBridgeService.SET_OUTPUT_DEVICE)
                 .putExtra(AudioBridgeService.EXTRA_OUTPUT_DEVICE_ID, deviceId);
             startService(route);
-            status.setText(deviceId == 0 ? "SoundPad will use Android's system-default output." :
-                "Requested output: " + outputLabels.get(position) + ". Android/device support may override app-specific routing.");
+            status.setText(deviceId == 0 ? "Playback output set to Android system default." : "Playback output requested: " + outputLabels.get(position));
         });
-        addButton(root, "Use Android communication-audio mode", v -> {
+        addButton(root, "TEST SELECTED MICROPHONE INPUT", v -> {
+            int position = inputSpinner.getSelectedItemPosition();
+            pendingMicDeviceId = position <= 0 || position - 1 >= inputDevices.size() ? 0 : inputDevices.get(position - 1).getId();
+            if (Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQ_MIC_TEST);
+            } else {
+                testMicrophoneInput(pendingMicDeviceId);
+            }
+        });
+        addButton(root, "USE ANDROID COMMUNICATION AUDIO MODE", v -> {
             startService(new Intent(this, AudioBridgeService.class).setAction(AudioBridgeService.ROUTE_CALL_AUDIO));
-            status.setText("Requested Android communication-audio mode. This does not create a virtual microphone.");
+            status.setText("Communication-audio routing requested. Android decides the available route; no virtual mic is created.");
         });
-        addButton(root, "Choose audio file for microphone/audio test", v -> {
+        addButton(root, "CHOOSE AUDIO FILE", v -> {
             Intent picker = new Intent(Intent.ACTION_OPEN_DOCUMENT);
             picker.addCategory(Intent.CATEGORY_OPENABLE);
             picker.setType("audio/*");
             picker.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
             startActivityForResult(picker, REQ_AUDIO_FILE);
         });
-        addButton(root, "▶ Play selected file through chosen output", v -> {
+        addButton(root, "▶ PLAY FILE THROUGH SELECTED OUTPUT", v -> {
             if (selectedAudioUri == null) { status.setText("Choose an audio file first."); return; }
             int position = outputSpinner.getSelectedItemPosition();
             int deviceId = position <= 0 || position - 1 >= outputDevices.size() ? 0 : outputDevices.get(position - 1).getId();
             Intent play = new Intent(this, AudioBridgeService.class).setAction(AudioBridgeService.PLAY).setData(selectedAudioUri)
                 .putExtra(AudioBridgeService.EXTRA_OUTPUT_DEVICE_ID, deviceId);
             if (Build.VERSION.SDK_INT >= 26) startForegroundService(play); else startService(play);
-            status.setText("Starting audio playback using the selected output route where supported.");
+            status.setText("Starting selected audio file on " + (deviceId == 0 ? "system default output" : outputLabels.get(position)) + ".");
         });
-        addButton(root, "Pause audio playback", v -> startService(new Intent(this, AudioBridgeService.class).setAction(AudioBridgeService.PAUSE)));
-        addButton(root, "Resume audio playback", v -> startService(new Intent(this, AudioBridgeService.class).setAction(AudioBridgeService.RESUME)));
-        addButton(root, "Stop audio playback and reset routing", v -> startService(new Intent(this, AudioBridgeService.class).setAction(AudioBridgeService.STOP)));
+        addButton(root, "PAUSE PLAYBACK", v -> startService(new Intent(this, AudioBridgeService.class).setAction(AudioBridgeService.PAUSE)));
+        addButton(root, "RESUME PLAYBACK", v -> startService(new Intent(this, AudioBridgeService.class).setAction(AudioBridgeService.RESUME)));
+        addButton(root, "STOP PLAYBACK / RESET ROUTING", v -> startService(new Intent(this, AudioBridgeService.class).setAction(AudioBridgeService.STOP)));
+        addButton(root, "OPEN ANDROID SOUND SETTINGS", v -> {
+            try { startActivity(new Intent("android.settings.SOUND_SETTINGS")); }
+            catch (Exception e) { status.setText("Open Android Settings to manage connected audio devices."); }
+        });
         TextView bridgeNote = new TextView(this);
         bridgeNote.setText("Important: Android exposes playback outputs (speaker, wired headset, Bluetooth and USB when connected) separately from microphone inputs. An ordinary no-root app cannot select a microphone as a speaker output or create a virtual mic that another game/app can use. This screen routes SoundPad playback to a supported output; for mic loopback you still need compatible physical audio hardware or an Android/device feature that explicitly supports it. The communication mode is only a routing request.");
         root.addView(bridgeNote);
@@ -200,6 +236,72 @@ public class MainActivity extends Activity {
         });
     }
 
+    private void refreshInputDevices(java.util.ArrayList<android.media.AudioDeviceInfo> devices, java.util.ArrayList<String> labels) {
+        if (Build.VERSION.SDK_INT >= 23) {
+            android.media.AudioManager am = (android.media.AudioManager)getSystemService(AUDIO_SERVICE);
+            if (am != null) for (android.media.AudioDeviceInfo device : am.getDevices(android.media.AudioManager.GET_DEVICES_INPUTS)) {
+                devices.add(device);
+                labels.add(audioInputDeviceLabel(device));
+            }
+        }
+    }
+
+    private String audioInputDeviceLabel(android.media.AudioDeviceInfo device) {
+        String type;
+        switch (device.getType()) {
+            case android.media.AudioDeviceInfo.TYPE_BUILTIN_MIC: type = "Built-in microphone"; break;
+            case android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET: type = "Wired headset microphone"; break;
+            case android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO: type = "Bluetooth call microphone"; break;
+            case android.media.AudioDeviceInfo.TYPE_USB_DEVICE:
+            case android.media.AudioDeviceInfo.TYPE_USB_HEADSET: type = "USB microphone"; break;
+            default: type = "Microphone input (type " + device.getType() + ")"; break;
+        }
+        CharSequence name = device.getProductName();
+        return type + (name == null || name.length() == 0 ? "" : " — " + name);
+    }
+
+    private void testMicrophoneInput(final int deviceId) {
+        status.setText("Testing microphone input for up to 3 seconds…");
+        new Thread(() -> {
+            AudioRecord recorder = null;
+            try {
+                int min = AudioRecord.getMinBufferSize(44100, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
+                if (min <= 0) throw new IllegalStateException("This device does not support the requested microphone format.");
+                recorder = new AudioRecord.Builder()
+                    .setAudioSource(MediaRecorder.AudioSource.DEFAULT)
+                    .setAudioFormat(new AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(44100).setChannelMask(AudioFormat.CHANNEL_IN_MONO).build())
+                    .setBufferSizeInBytes(Math.max(min, 8192)).build();
+                if (recorder.getState() != AudioRecord.STATE_INITIALIZED) throw new IllegalStateException("Microphone could not be initialized.");
+                if (Build.VERSION.SDK_INT >= 23 && deviceId != 0) {
+                    android.media.AudioManager am = (android.media.AudioManager)getSystemService(AUDIO_SERVICE);
+                    boolean found = false;
+                    if (am != null) for (android.media.AudioDeviceInfo d : am.getDevices(android.media.AudioManager.GET_DEVICES_INPUTS)) {
+                        if (d.getId() == deviceId) { found = recorder.setPreferredDevice(d); break; }
+                    }
+                    if (!found) throw new IllegalStateException("Selected microphone is unavailable or Android rejected it.");
+                }
+                recorder.startRecording();
+                short[] samples = new short[2048];
+                long end = android.os.SystemClock.elapsedRealtime() + 3000;
+                long total = 0;
+                int reads = 0;
+                while (android.os.SystemClock.elapsedRealtime() < end) {
+                    int n = recorder.read(samples, 0, samples.length);
+                    if (n < 0) throw new IllegalStateException("Microphone read failed: " + n);
+                    for (int i = 0; i < n; i++) total += (long)samples[i] * samples[i];
+                    reads += n;
+                }
+                final double rms = reads == 0 ? 0 : Math.sqrt((double)total / reads);
+                runOnUiThread(() -> status.setText(String.format(Locale.US, "Microphone test finished. Input RMS level: %.0f / 32768. This tests recording input only; it does not route playback into another app's mic.", rms)));
+            } catch (Exception e) {
+                runOnUiThread(() -> status.setText("Microphone test failed: " + e.getMessage()));
+            } finally {
+                if (recorder != null) { try { recorder.stop(); } catch (Exception ignored) {} recorder.release(); }
+            }
+        }, "SoundPad-mic-test").start();
+    }
+
     private String audioDeviceLabel(android.media.AudioDeviceInfo device) {
         String type;
         switch (device.getType()) {
@@ -260,7 +362,10 @@ public class MainActivity extends Activity {
 
     @Override public void onRequestPermissionsResult(int request, String[] permissions, int[] results) {
         super.onRequestPermissionsResult(request, permissions, results);
-        if (request == REQ_RECORD_AUDIO) {
+        if (request == REQ_MIC_TEST) {
+            if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) testMicrophoneInput(pendingMicDeviceId);
+            else status.setText("Microphone permission was not granted.");
+        } else if (request == REQ_RECORD_AUDIO) {
             if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) launchCaptureConsent();
             else status.setText("Microphone permission is required by Android for playback capture. Permission was not granted.");
         }
