@@ -8,6 +8,7 @@ import android.content.pm.PackageManager;
 import android.media.AudioAttributes;
 import android.media.AudioFormat;
 import android.media.AudioTrack;
+import android.net.Uri;
 import android.media.projection.MediaProjectionManager;
 import android.os.Build;
 import android.os.Bundle;
@@ -23,6 +24,8 @@ public class MainActivity extends Activity {
     private static final int REQ_CAPTURE = 8;
     private static final int REQ_RECORD_AUDIO = 9;
     private static final int REQ_SCREEN_CAPTURE = 10;
+    private static final int REQ_AUDIO_FILE = 11;
+    private Uri selectedAudioUri;
     private static final int SAMPLE_RATE = 44100;
 
     private TextToSpeech tts;
@@ -56,6 +59,30 @@ public class MainActivity extends Activity {
         status = new TextView(this);
         status.setText("Ready. Internal playback capture requires Android 10+ and the source app must allow capture.");
         root.addView(status);
+
+        TextView bridgeTitle = new TextView(this);
+        bridgeTitle.setText("\\nAudio Bridge — background playback");
+        bridgeTitle.setTextSize(20);
+        root.addView(bridgeTitle);
+        addButton(root, "Choose audio file for speaker/Bluetooth", v -> {
+            Intent picker = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            picker.addCategory(Intent.CATEGORY_OPENABLE);
+            picker.setType("audio/*");
+            picker.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+            startActivityForResult(picker, REQ_AUDIO_FILE);
+        });
+        addButton(root, "▶ Play audio in background", v -> {
+            if (selectedAudioUri == null) { status.setText("Choose an audio file first."); return; }
+            Intent play = new Intent(this, AudioBridgeService.class).setAction(AudioBridgeService.PLAY).setData(selectedAudioUri);
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(play); else startService(play);
+            status.setText("Audio playback started. Android routes it to the current phone or Bluetooth output.");
+        });
+        addButton(root, "Pause Audio Bridge", v -> startService(new Intent(this, AudioBridgeService.class).setAction(AudioBridgeService.PAUSE)));
+        addButton(root, "Resume Audio Bridge", v -> startService(new Intent(this, AudioBridgeService.class).setAction(AudioBridgeService.RESUME)));
+        addButton(root, "Stop Audio Bridge", v -> startService(new Intent(this, AudioBridgeService.class).setAction(AudioBridgeService.STOP)));
+        TextView bridgeNote = new TextView(this);
+        bridgeNote.setText("No-root Android limitation: this plays sound through the selected phone/Bluetooth output and continues in the background. Android does not let ordinary apps expose that playback as a virtual microphone to a game or another app. Internal playback capture is separate and only works when the source app permits it.");
+        root.addView(bridgeNote);
 
         TextView screenTitle = new TextView(this);
         screenTitle.setText("\\nScreen recording");
@@ -378,7 +405,13 @@ public class MainActivity extends Activity {
 
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
-        if (request == REQ_SCREEN_CAPTURE && result == Activity.RESULT_OK && data != null) {
+        if (request == REQ_AUDIO_FILE && result == Activity.RESULT_OK && data != null) {
+            selectedAudioUri = data.getData();
+            try { getContentResolver().takePersistableUriPermission(selectedAudioUri, Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Exception ignored) {}
+            status.setText("Audio file selected. Play sends it to the current phone/Bluetooth output.");
+        } else if (request == REQ_AUDIO_FILE) {
+            status.setText("Audio file selection cancelled.");
+        } else if (request == REQ_SCREEN_CAPTURE && result == Activity.RESULT_OK && data != null) {
             int fps = fpsSpinner != null && fpsSpinner.getSelectedItemPosition() == 1 ? 120 : 60;
             Intent service = new Intent(this, ScreenRecordService.class).setAction("START")
                 .putExtra("code", result).putExtra("data", data)
