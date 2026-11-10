@@ -18,6 +18,9 @@ public class AudioBridgeService extends Service {
     public static final String RESUME = "com.alxt.SoundPad.AUDIO_RESUME";
     public static final String STOP = "com.alxt.SoundPad.AUDIO_STOP";
     public static final String ROUTE_CALL_AUDIO = "com.alxt.SoundPad.AUDIO_ROUTE_CALL";
+    public static final String SET_OUTPUT_DEVICE = "com.alxt.SoundPad.AUDIO_SET_OUTPUT_DEVICE";
+    public static final String EXTRA_OUTPUT_DEVICE_ID = "output_device_id";
+    private int preferredOutputDeviceId = 0;
     private android.media.AudioManager audioManager;
     private boolean callAudioRoute = false;
     private static final String CHANNEL = "soundpad_audio_bridge";
@@ -35,6 +38,12 @@ public class AudioBridgeService extends Service {
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent == null ? "" : intent.getAction();
+        if (SET_OUTPUT_DEVICE.equals(action)) {
+            preferredOutputDeviceId = intent.getIntExtra(EXTRA_OUTPUT_DEVICE_ID, 0);
+            applyPreferredOutput();
+            showNotification(preferredOutputDeviceId == 0 ? "Using system-default audio output" : "Requested selected audio output");
+            return START_NOT_STICKY;
+        }
         if (ROUTE_CALL_AUDIO.equals(action)) {
             callAudioRoute = true;
             if (audioManager != null) audioManager.setMode(android.media.AudioManager.MODE_IN_COMMUNICATION);
@@ -70,6 +79,7 @@ public class AudioBridgeService extends Service {
                     .setUsage(callAudioRoute ? AudioAttributes.USAGE_VOICE_COMMUNICATION : AudioAttributes.USAGE_MEDIA)
                     .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build());
                 player.setDataSource(this, uri);
+                applyPreferredOutput();
                 player.setOnPreparedListener(mp -> {
                     mp.start();
                     showNotification("Playing through current phone/Bluetooth output");
@@ -86,6 +96,25 @@ public class AudioBridgeService extends Service {
             }
         }
         return START_NOT_STICKY;
+    }
+
+    private void applyPreferredOutput() {
+        if (Build.VERSION.SDK_INT >= 23 && player != null) {
+            if (preferredOutputDeviceId == 0) {
+                player.setPreferredDevice(null);
+                return;
+            }
+            android.media.AudioManager manager = (android.media.AudioManager)getSystemService(AUDIO_SERVICE);
+            if (manager == null) return;
+            for (android.media.AudioDeviceInfo device : manager.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS)) {
+                if (device.getId() == preferredOutputDeviceId) {
+                    boolean applied = player.setPreferredDevice(device);
+                    if (!applied) showNotification("Android rejected this output route; using system default");
+                    return;
+                }
+            }
+            showNotification("Selected output is no longer connected; using system default");
+        }
     }
 
     private Notification buildNotification(String state) {
