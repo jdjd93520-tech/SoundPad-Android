@@ -17,12 +17,16 @@ public class AudioBridgeService extends Service {
     public static final String PAUSE = "com.alxt.SoundPad.AUDIO_PAUSE";
     public static final String RESUME = "com.alxt.SoundPad.AUDIO_RESUME";
     public static final String STOP = "com.alxt.SoundPad.AUDIO_STOP";
+    public static final String ROUTE_CALL_AUDIO = "com.alxt.SoundPad.AUDIO_ROUTE_CALL";
+    private android.media.AudioManager audioManager;
+    private boolean callAudioRoute = false;
     private static final String CHANNEL = "soundpad_audio_bridge";
     private static final int NOTIFICATION_ID = 7301;
     private MediaPlayer player;
 
     @Override public void onCreate() {
         super.onCreate();
+        audioManager = (android.media.AudioManager) getSystemService(AUDIO_SERVICE);
         if (Build.VERSION.SDK_INT >= 26) {
             NotificationChannel channel = new NotificationChannel(CHANNEL, "SoundPad background audio", NotificationManager.IMPORTANCE_LOW);
             getSystemService(NotificationManager.class).createNotificationChannel(channel);
@@ -31,8 +35,15 @@ public class AudioBridgeService extends Service {
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent == null ? "" : intent.getAction();
+        if (ROUTE_CALL_AUDIO.equals(action)) {
+            callAudioRoute = true;
+            if (audioManager != null) audioManager.setMode(android.media.AudioManager.MODE_IN_COMMUNICATION);
+            showNotification("Call-audio routing requested; microphone injection is not provided");
+            return START_NOT_STICKY;
+        }
         if (STOP.equals(action)) {
             releasePlayer();
+            resetAudioRoute();
             stopForeground(true);
             stopSelf();
             return START_NOT_STICKY;
@@ -56,7 +67,7 @@ public class AudioBridgeService extends Service {
             try {
                 player = new MediaPlayer();
                 player.setAudioAttributes(new AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setUsage(callAudioRoute ? AudioAttributes.USAGE_VOICE_COMMUNICATION : AudioAttributes.USAGE_MEDIA)
                     .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build());
                 player.setDataSource(this, uri);
                 player.setOnPreparedListener(mp -> {
@@ -97,6 +108,13 @@ public class AudioBridgeService extends Service {
         getSystemService(NotificationManager.class).notify(NOTIFICATION_ID, buildNotification(state));
     }
 
+    private void resetAudioRoute() {
+        if (audioManager != null && callAudioRoute) {
+            try { audioManager.setMode(android.media.AudioManager.MODE_NORMAL); } catch (Exception ignored) {}
+        }
+        callAudioRoute = false;
+    }
+
     private void releasePlayer() {
         if (player != null) {
             try { if (player.isPlaying()) player.stop(); } catch (Exception ignored) {}
@@ -105,6 +123,6 @@ public class AudioBridgeService extends Service {
         }
     }
 
-    @Override public void onDestroy() { releasePlayer(); super.onDestroy(); }
+    @Override public void onDestroy() { releasePlayer(); resetAudioRoute(); super.onDestroy(); }
     @Override public IBinder onBind(Intent intent) { return null; }
 }
