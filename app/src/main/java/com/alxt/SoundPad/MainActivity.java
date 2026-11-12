@@ -17,6 +17,8 @@ import java.util.Locale;
 
 public class MainActivity extends Activity {
     private static final int REQ_CAPTURE = 10, RATE = 44100;
+    public static final String ACTION_FLOAT_START_RECORD = "com.alxt.SoundPad.FLOAT_START_RECORD";
+    public static final String ACTION_FLOAT_PLAY_RECORD = "com.alxt.SoundPad.FLOAT_PLAY_RECORD";
     private android.speech.tts.TextToSpeech tts;
     private EditText words, link;
     private TextView status;
@@ -56,6 +58,7 @@ public class MainActivity extends Activity {
         TextView linkInfo=new TextView(this); linkInfo.setText("Links open in the official app or browser. SoundPad does not extract or download streams from YouTube or SoundCloud."); root.addView(linkInfo);
 
         setContentView(scroll);
+        handleFloatingAction(getIntent());
         tts=new android.speech.tts.TextToSpeech(this,result -> runOnUiThread(() -> {
             if(result==android.speech.tts.TextToSpeech.SUCCESS && tts!=null) {
                 int lang=tts.setLanguage(Locale.getDefault());
@@ -64,6 +67,8 @@ public class MainActivity extends Activity {
             } else status.setText("Text-to-speech could not initialize.");
         }));
     }
+    private void handleFloatingAction(Intent intent){ if(intent==null)return; String a=intent.getAction(); if(ACTION_FLOAT_START_RECORD.equals(a)){ requestCapture(); } else if(ACTION_FLOAT_PLAY_RECORD.equals(a)){ playRecording(); } }
+    @Override protected void onNewIntent(Intent intent){ super.onNewIntent(intent); setIntent(intent); handleFloatingAction(intent); }
     private void section(LinearLayout root,String value){TextView t=new TextView(this);t.setText("\n"+value);t.setTextSize(21);t.setPadding(0,18,0,8);root.addView(t);}
     private void button(LinearLayout root,String label,android.view.View.OnClickListener click){Button b=new Button(this);b.setText(label);root.addView(b,new LinearLayout.LayoutParams(-1,-2));b.setOnClickListener(click);}
     private void startFloating(){
