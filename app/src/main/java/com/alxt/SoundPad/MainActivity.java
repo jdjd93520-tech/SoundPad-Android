@@ -23,12 +23,8 @@ public class MainActivity extends Activity {
     private static final String PREFS = "soundpad_audio_settings";
     private static final String PREF_MONITOR = "monitor_enabled";
     private static final String PREF_OUTPUT = "output_device_id";
-    private static final String PREF_FLOAT_LOCKED = "floating_panel_locked";
-    public static final String ACTION_FLOAT_SET_LOCK = "com.alxt.SoundPad.FLOAT_SET_LOCK";
     private static final String PREF_TTS_RATE = "tts_rate";
     private static final String PREF_TTS_PITCH = "tts_pitch";
-    public static final String ACTION_FLOAT_START_RECORD = "com.alxt.SoundPad.FLOAT_START_RECORD";
-    public static final String ACTION_FLOAT_PLAY_RECORD = "com.alxt.SoundPad.FLOAT_PLAY_RECORD";
     private android.speech.tts.TextToSpeech tts;
     private EditText words, link;
     private TextView status, routeStatus;
@@ -74,29 +70,12 @@ public class MainActivity extends Activity {
         button(root,"SAVE RECORDING TO DOWNLOADS",v -> saveRecording());
         TextView captureInfo=new TextView(this); captureInfo.setText("Android screen-capture permission is required. Only apps that allow playback capture can be recorded."); root.addView(captureInfo);
 
-        section(root,"Floating controls");
-        button(root,"START FLOATING DISPLAY",v -> startFloating());
-        button(root,"STOP FLOATING DISPLAY",v -> { stopService(new Intent(this,FloatingSoundboardService.class).setAction(FloatingSoundboardService.STOP)); status.setText("Floating display stopped."); });
-        Button lockButton=new Button(this);
-        lockButton.setText(prefs.getBoolean(PREF_FLOAT_LOCKED,true)?"UNLOCK FLOATING PANEL":"LOCK FLOATING PANEL");
-        root.addView(lockButton,new LinearLayout.LayoutParams(-1,-2));
-        lockButton.setOnClickListener(v->{
-            boolean locked=!prefs.getBoolean(PREF_FLOAT_LOCKED,true);
-            prefs.edit().putBoolean(PREF_FLOAT_LOCKED,locked).apply();
-            lockButton.setText(locked?"UNLOCK FLOATING PANEL":"LOCK FLOATING PANEL");
-            Intent lockIntent=new Intent(this,FloatingSoundboardService.class).setAction(ACTION_FLOAT_SET_LOCK).putExtra(PREF_FLOAT_LOCKED,locked);
-            if(FloatingSoundboardService.running){try{startService(lockIntent);}catch(Exception ignored){}}
-            status.setText(locked?"Floating panel locked.":"Floating panel unlocked; drag it to move.");
-        });
-        TextView floatInfo=new TextView(this); floatInfo.setText("Change the floating panel lock here in SoundPad settings. Use the X on the floating panel to close it."); root.addView(floatInfo);
-
         section(root,"Open audio link");
         link=new EditText(this); link.setHint("Paste a YouTube, SoundCloud or direct audio link"); link.setSingleLine(true); root.addView(link);
         button(root,"OPEN LINK",v -> openLink());
         TextView linkInfo=new TextView(this); linkInfo.setText("Links open in the installed app or browser. SoundPad does not extract or download streams from YouTube or SoundCloud."); root.addView(linkInfo);
 
         setContentView(scroll);
-        handleFloatingAction(getIntent());
         initTts();
     }
 
@@ -204,19 +183,8 @@ public class MainActivity extends Activity {
         Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("audio/*");
         startActivityForResult(i,REQ_AUDIO_FILE);
     }
-    private void handleFloatingAction(Intent intent){ if(intent==null)return; String a=intent.getAction(); if(ACTION_FLOAT_START_RECORD.equals(a)){ requestCapture(); } else if(ACTION_FLOAT_PLAY_RECORD.equals(a)){ playRecording(); } }
-    @Override protected void onNewIntent(Intent intent){ super.onNewIntent(intent); setIntent(intent); handleFloatingAction(intent); }
     private void section(LinearLayout root,String value){TextView t=new TextView(this);t.setText("\n"+value);t.setTextSize(21);t.setPadding(0,18,0,8);root.addView(t);}
     private void button(LinearLayout root,String label,android.view.View.OnClickListener click){Button b=new Button(this);b.setText(label);root.addView(b,new LinearLayout.LayoutParams(-1,-2));b.setOnClickListener(click);}
-    private void startFloating(){
-        if(Build.VERSION.SDK_INT>=23 && !android.provider.Settings.canDrawOverlays(this)){
-            startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,Uri.parse("package:"+getPackageName())));
-            status.setText("Allow display over other apps, then tap START FLOATING DISPLAY again.");return;
-        }
-        Intent i=new Intent(this,FloatingSoundboardService.class).setAction(FloatingSoundboardService.START).putExtra(PREF_FLOAT_LOCKED,prefs.getBoolean(PREF_FLOAT_LOCKED,true));
-        if(Build.VERSION.SDK_INT>=26)startForegroundService(i);else startService(i);
-        status.setText("Floating controls started.");
-    }
     private void openLink(){
         String s=link.getText().toString().trim();if(s.isEmpty()){status.setText("Paste a link first.");return;}
         Uri u=Uri.parse(s);String scheme=u.getScheme();
