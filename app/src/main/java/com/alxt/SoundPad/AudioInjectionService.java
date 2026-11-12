@@ -92,6 +92,8 @@ public final class AudioInjectionService extends IAudioInjectionService.Stub {
             Method register = manager.getClass().getDeclaredMethod("registerAudioPolicy", policy.getClass());
             int result = (Integer) register.invoke(manager, policy);
             if (result != 0) throw new IllegalStateException("registerAudioPolicy returned " + result);
+            this.audioManager = manager;
+            this.audioPolicy = policy;
 
             Method createTrack = policy.getClass().getDeclaredMethod("createAudioTrackSource", mix.getClass());
             AudioTrack audioTrack = (AudioTrack) createTrack.invoke(policy, mix);
@@ -109,6 +111,16 @@ public final class AudioInjectionService extends IAudioInjectionService.Stub {
             return "OK: AudioPolicy injection started. Start internal-audio recording to feed it.";
         } catch (Throwable error) {
             closeQuietly(pipe);
+            AudioManager manager = audioManager;
+            Object policy = audioPolicy;
+            audioManager = null;
+            audioPolicy = null;
+            if (manager != null && policy != null) unregister(manager, policy);
+            AudioTrack failedTrack = track;
+            track = null;
+            if (failedTrack != null) {
+                try { failedTrack.release(); } catch (Throwable ignored) {}
+            }
             status = "Injection setup failed: " + rootMessage(error);
             Log.e(TAG, status, error);
             return status;
@@ -157,6 +169,19 @@ public final class AudioInjectionService extends IAudioInjectionService.Stub {
         Thread activeWorker = worker;
         if (activeWorker != null && activeWorker != Thread.currentThread()) {
             try { activeWorker.join(1200); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+        }
+        if (activeWorker == null || !activeWorker.isAlive()) {
+            AudioTrack activeTrack = track;
+            track = null;
+            if (activeTrack != null) {
+                try { activeTrack.stop(); } catch (Throwable ignored) {}
+                try { activeTrack.release(); } catch (Throwable ignored) {}
+            }
+            AudioManager manager = audioManager;
+            Object policy = audioPolicy;
+            audioManager = null;
+            audioPolicy = null;
+            if (manager != null && policy != null) unregister(manager, policy);
         }
         status = "Injection stopped";
     }
