@@ -70,6 +70,7 @@ public class CaptureService extends Service {
             writerThread = new Thread(this::writeCapture, "SoundPad-capture-writer");
             writerThread.start();
         } catch (Exception e) {
+            broadcastStatus("Internal audio capture failed: " + e.getMessage());
             stopCapture();
             stopSelf();
         }
@@ -87,15 +88,20 @@ public class CaptureService extends Service {
                 int count = active.read(buffer, 0, buffer.length, AudioRecord.READ_BLOCKING);
                 if (count > 0) {
                     stream.write(buffer, 0, count);
-                } else if (count < 0 && count != AudioRecord.ERROR_INVALID_OPERATION) {
-                    throw new IOException("AudioRecord read error " + count);
+                } else if (count < 0) {
+                    if (recording) throw new IOException("Audio capture read failed (" + count + ")");
+                    break;
                 }
             }
             stream.flush();
-        } catch (Exception ignored) {
-            // Keep the partial PCM file available when capture stops or an app blocks capture.
+            broadcastStatus("Internal audio recording saved and ready to play.");
+        } catch (Exception e) {
+            if (recording) broadcastStatus("Internal audio recording stopped: " + e.getMessage());
         } finally {
             stopCapture();
+            synchronized (lock) {
+                if (writerThread == Thread.currentThread()) writerThread = null;
+            }
             stopSelf();
         }
     }
@@ -112,20 +118,36 @@ public class CaptureService extends Service {
         recording = false;
         AudioRecord active;
         MediaProjection activeProjection;
+        Thread writer;
         synchronized (lock) {
             active = recorder;
             recorder = null;
             activeProjection = projection;
             projection = null;
+            writer = writerThread;
         }
         if (active != null) {
             try { active.stop(); } catch (Exception ignored) {}
+        }
+        if (writer != null && writer != Thread.currentThread()) {
+            try { writer.join(2500); } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        if (active != null) {
             try { active.release(); } catch (Exception ignored) {}
         }
         if (activeProjection != null) {
             try { activeProjection.stop(); } catch (Exception ignored) {}
         }
         stopForeground(true);
+    }
+
+    private void broadcastStatus(String message) {
+        Intent update = new Intent("com.alxt.SoundPad.CAPTURE_STATUS");
+        update.setPackage(getPackageName());
+        update.putExtra("message", message);
+        sendBroadcast(update);
     }
 
     @Override public void onDestroy() { stopCapture(); super.onDestroy(); }
