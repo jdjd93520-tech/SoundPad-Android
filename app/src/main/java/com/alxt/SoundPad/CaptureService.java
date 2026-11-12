@@ -14,9 +14,15 @@ public class CaptureService extends Service {
     private volatile boolean recording;
     private Thread writerThread;
     private final Object lock = new Object();
+    private volatile ParcelFileDescriptor injectionPipe;
+    private volatile OutputStream injectionOutput;
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent == null) return START_NOT_STICKY;
+        if ("STOP_INJECTION".equals(intent.getAction())) {
+            closeInjectionPipe();
+            return START_NOT_STICKY;
+        }
         if ("STOP".equals(intent.getAction())) {
             stopCapture();
             return START_NOT_STICKY;
@@ -35,6 +41,13 @@ public class CaptureService extends Service {
 
         try {
             MediaProjectionManager manager = (MediaProjectionManager)getSystemService(MEDIA_PROJECTION_SERVICE);
+            if (Build.VERSION.SDK_INT >= 33) {
+                injectionPipe = intent.getParcelableExtra("inject_pipe", ParcelFileDescriptor.class);
+            } else {
+                injectionPipe = intent.getParcelableExtra("inject_pipe");
+            }
+            if (injectionPipe != null) injectionOutput = new FileOutputStream(injectionPipe.getFileDescriptor());
+
             projection = manager.getMediaProjection(intent.getIntExtra("code", 0),
                 (Intent)intent.getParcelableExtra("data"));
             if (projection == null) throw new IllegalStateException("MediaProjection permission unavailable");
@@ -78,8 +91,18 @@ public class CaptureService extends Service {
                 synchronized (lock) { active = recorder; }
                 if (active == null) break;
                 int count = active.read(buffer, 0, buffer.length, AudioRecord.READ_BLOCKING);
-                if (count > 0) stream.write(buffer, 0, count);
-                else if (count < 0 && count != AudioRecord.ERROR_INVALID_OPERATION) {
+                if (count > 0) {
+                    stream.write(buffer, 0, count);
+                    OutputStream pipe = injectionOutput;
+                    if (pipe != null) {
+                        try {
+                            pipe.write(buffer, 0, count);
+                            pipe.flush();
+                        } catch (IOException pipeError) {
+                            closeInjectionPipe();
+                        }
+                    }
+                } else if (count < 0 && count != AudioRecord.ERROR_INVALID_OPERATION) {
                     throw new IOException("AudioRecord read error " + count);
                 }
             }
@@ -99,8 +122,18 @@ public class CaptureService extends Service {
         }
     }
 
+    private void closeInjectionPipe() {
+        OutputStream output = injectionOutput;
+        injectionOutput = null;
+        if (output != null) try { output.close(); } catch (Exception ignored) {}
+        ParcelFileDescriptor pipe = injectionPipe;
+        injectionPipe = null;
+        if (pipe != null) try { pipe.close(); } catch (Exception ignored) {}
+    }
+
     private void stopCapture() {
         recording = false;
+        closeInjectionPipe();
         AudioRecord active;
         MediaProjection activeProjection;
         synchronized (lock) {
