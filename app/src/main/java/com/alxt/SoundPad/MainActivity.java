@@ -85,7 +85,7 @@ public class MainActivity extends Activity {
             prefs.edit().putBoolean(PREF_FLOAT_LOCKED,locked).apply();
             lockButton.setText(locked?"UNLOCK FLOATING PANEL":"LOCK FLOATING PANEL");
             Intent lockIntent=new Intent(this,FloatingSoundboardService.class).setAction(ACTION_FLOAT_SET_LOCK).putExtra(PREF_FLOAT_LOCKED,locked);
-            try{startService(lockIntent);}catch(Exception ignored){}
+            if(FloatingSoundboardService.running){try{startService(lockIntent);}catch(Exception ignored){}}
             status.setText(locked?"Floating panel locked.":"Floating panel unlocked; drag it to move.");
         });
         TextView floatInfo=new TextView(this); floatInfo.setText("Change the floating panel lock here in SoundPad settings. Use the X on the floating panel to close it."); root.addView(floatInfo);
@@ -113,6 +113,18 @@ public class MainActivity extends Activity {
         float rate=prefs.getInt(PREF_TTS_RATE,10)/10.0f;
         float pitch=prefs.getInt(PREF_TTS_PITCH,10)/10.0f;
         tts.setSpeechRate(rate);tts.setPitch(pitch);
+    }
+
+    private void initTts(){
+        if(tts!=null){try{tts.stop();tts.shutdown();}catch(Exception ignored){}}
+        tts=new android.speech.tts.TextToSpeech(this,result->runOnUiThread(()->{
+            if(result==android.speech.tts.TextToSpeech.SUCCESS){
+                int lang=tts.setLanguage(Locale.getDefault());
+                if(lang==android.speech.tts.TextToSpeech.LANG_MISSING_DATA||lang==android.speech.tts.TextToSpeech.LANG_NOT_SUPPORTED)tts.setLanguage(Locale.US);
+                applyTtsSettings();
+                status.setText("Android text-to-speech ready.");
+            }else status.setText("Text-to-speech could not initialize.");
+        }));
     }
 
     private void updateRouteStatus(){
