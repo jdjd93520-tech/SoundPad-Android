@@ -149,7 +149,7 @@ public class MainActivity extends Activity {
         Shizuku.UserServiceArgs args = new Shizuku.UserServiceArgs(
             new ComponentName(this, VirtualMicUserService.class))
             .daemon(false).processNameSuffix("soundpad_audio")
-            .debuggable(BuildConfig.DEBUG).version(1);
+            .debuggable(false).version(1);
         Shizuku.bindUserService(args, injectorConnection);
         injectorBound = true;
         status.setText("Connecting to Shizuku audio injector…");
@@ -207,7 +207,7 @@ public class MainActivity extends Activity {
             Shizuku.unbindUserService(new Shizuku.UserServiceArgs(
                 new ComponentName(this, VirtualMicUserService.class))
                 .daemon(false).processNameSuffix("soundpad_audio")
-                .debuggable(BuildConfig.DEBUG).version(1), injectorConnection, true);
+                .debuggable(false).version(1), injectorConnection, true);
             injectorBound = false;
         }
         injectorBinder = null;
