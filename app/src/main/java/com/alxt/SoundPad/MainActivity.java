@@ -49,6 +49,11 @@ public class MainActivity extends Activity {
         words = new EditText(this); words.setHint("Type text here…"); words.setMinLines(3); words.setGravity(Gravity.TOP); root.addView(words);
         button(root,"SPEAK TEXT",v -> { String s=words.getText().toString().trim(); if(s.isEmpty()){status.setText("Type something to speak.");return;} if(tts!=null) tts.speak(s,android.speech.tts.TextToSpeech.QUEUE_FLUSH,null,"soundpad"); });
         button(root,"STOP SPEAKING",v -> { if(tts!=null) tts.stop(); });
+        button(root,"CONNECT CLONETTS VOICE ENGINE",v -> connectCloneTts());
+        button(root,"OPEN CLONETTS VOICE MANAGER",v -> openCloneTts());
+        TextView cloneInfo=new TextView(this);
+        cloneInfo.setText("CloneTTS integration uses its installed Android TTS engine. Install CloneTTS separately, create a voice from a saved WAV sample and its exact transcript, then connect the engine here. SoundPad does not copy or bundle CloneTTS's private app code or model files.");
+        root.addView(cloneInfo);
 
         section(root,"Internal audio recording");
         button(root,"START INTERNAL AUDIO RECORDING",v -> requestCapture());
@@ -56,6 +61,7 @@ public class MainActivity extends Activity {
         button(root,"PLAY INTERNAL AUDIO RECORDING",v -> playRecording());
         button(root,"STOP RECORDING PLAYBACK",v -> stopPlayback());
         button(root,"SAVE RECORDING TO DOWNLOADS",v -> saveRecording());
+        button(root,"SAVE VOICE SAMPLE & OPEN CLONETTS",v -> { saveRecording(); openCloneTts(); });
         TextView captureInfo=new TextView(this); captureInfo.setText("Android screen-capture permission is required. Only apps that allow playback capture can be recorded."); root.addView(captureInfo);
 
         section(root,"Audio relay & routing settings");
@@ -91,13 +97,60 @@ public class MainActivity extends Activity {
 
         setContentView(scroll);
         handleFloatingAction(getIntent());
-        tts=new android.speech.tts.TextToSpeech(this,result -> runOnUiThread(() -> {
-            if(result==android.speech.tts.TextToSpeech.SUCCESS && tts!=null) {
+        initTts(null);
+    }
+
+    private static final String CLONETTS_PACKAGE = "com.sipeter.clonetts";
+
+    private boolean isCloneTtsInstalled(){
+        try { getPackageManager().getPackageInfo(CLONETTS_PACKAGE,0); return true; }
+        catch (Exception ignored) { return false; }
+    }
+
+    private void connectCloneTts(){
+        if(!isCloneTtsInstalled()){
+            status.setText("CloneTTS is not installed. Install CloneTTS v0.7.1, create your voice profile, then connect again.");
+            return;
+        }
+        initTts(CLONETTS_PACKAGE);
+    }
+
+    private void openCloneTts(){
+        if(!isCloneTtsInstalled()){
+            status.setText("CloneTTS is not installed. Install CloneTTS first.");
+            return;
+        }
+        Intent launch=getPackageManager().getLaunchIntentForPackage(CLONETTS_PACKAGE);
+        if(launch!=null){
+            launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(launch);
+            status.setText("Opened CloneTTS. Import the saved WAV under Voices > Add Voice > External Select.");
+        }else status.setText("CloneTTS is installed, but Android did not provide its launch activity.");
+    }
+
+    private void initTts(String enginePackage){
+        if(tts!=null){
+            try{tts.stop();tts.shutdown();}catch(Exception ignored){}
+            tts=null;
+        }
+        final String requestedEngine=enginePackage;
+        if(requestedEngine!=null && !isCloneTtsInstalled()){
+            status.setText("CloneTTS is not installed.");
+            return;
+        }
+        android.speech.tts.TextToSpeech.OnInitListener listener=result->runOnUiThread(()->{
+            if(result==android.speech.tts.TextToSpeech.SUCCESS && tts!=null){
                 int lang=tts.setLanguage(Locale.getDefault());
                 if(lang==android.speech.tts.TextToSpeech.LANG_MISSING_DATA || lang==android.speech.tts.TextToSpeech.LANG_NOT_SUPPORTED) tts.setLanguage(Locale.US);
-                status.setText("Text-to-speech ready.");
-            } else status.setText("Text-to-speech could not initialize.");
-        }));
+                status.setText(requestedEngine==null?"Android system TTS ready.":"CloneTTS voice engine connected. Select a saved CloneTTS voice in its app, then speak here.");
+            }else if(requestedEngine!=null){
+                status.setText("CloneTTS could not initialize. Falling back to Android system TTS.");
+                initTts(null);
+            }else status.setText("Text-to-speech could not initialize.");
+        });
+        tts=requestedEngine==null
+            ? new android.speech.tts.TextToSpeech(this,listener)
+            : new android.speech.tts.TextToSpeech(this,listener,requestedEngine);
     }
 
     private void updateRouteStatus(){
