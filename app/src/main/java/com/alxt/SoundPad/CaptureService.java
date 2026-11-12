@@ -13,6 +13,7 @@ public class CaptureService extends Service {
     private AudioRecord recorder;
     private volatile boolean recording;
     private Thread writerThread;
+    private AudioTrack monitorTrack;
     private final Object lock = new Object();
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
@@ -59,6 +60,21 @@ public class CaptureService extends Service {
             if (recorder.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING) {
                 throw new IllegalStateException("Audio capture did not start");
             }
+            int outMin = AudioTrack.getMinBufferSize(44100, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT);
+            monitorTrack = new AudioTrack.Builder()
+                .setAudioAttributes(new AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
+                .setAudioFormat(new AudioFormat.Builder()
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .setSampleRate(44100)
+                    .setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build())
+                .setBufferSizeInBytes(Math.max(outMin * 2, 32768))
+                .setTransferMode(AudioTrack.MODE_STREAM).build();
+            if (monitorTrack.getState() != AudioTrack.STATE_INITIALIZED) {
+                throw new IllegalStateException("Live audio monitor failed to initialize");
+            }
+            monitorTrack.play();
             recording = true;
             writerThread = new Thread(this::writeCapture, "SoundPad-capture-writer");
             writerThread.start();
@@ -78,7 +94,12 @@ public class CaptureService extends Service {
                 synchronized (lock) { active = recorder; }
                 if (active == null) break;
                 int count = active.read(buffer, 0, buffer.length, AudioRecord.READ_BLOCKING);
-                if (count > 0) stream.write(buffer, 0, count);
+                if (count > 0) {
+                    stream.write(buffer, 0, count);
+                    AudioTrack monitor;
+                    synchronized (lock) { monitor = monitorTrack; }
+                    if (monitor != null) monitor.write(buffer, 0, count, AudioTrack.WRITE_BLOCKING);
+                }
                 else if (count < 0 && count != AudioRecord.ERROR_INVALID_OPERATION) {
                     throw new IOException("AudioRecord read error " + count);
                 }
@@ -112,6 +133,17 @@ public class CaptureService extends Service {
         if (active != null) {
             try { active.stop(); } catch (Exception ignored) {}
             try { active.release(); } catch (Exception ignored) {}
+        }
+        AudioTrack activeMonitor;
+        synchronized (lock) {
+            activeMonitor = monitorTrack;
+            monitorTrack = null;
+        }
+        if (activeMonitor != null) {
+            try { activeMonitor.pause(); } catch (Exception ignored) {}
+            try { activeMonitor.flush(); } catch (Exception ignored) {}
+            try { activeMonitor.stop(); } catch (Exception ignored) {}
+            try { activeMonitor.release(); } catch (Exception ignored) {}
         }
         if (activeProjection != null) {
             try { activeProjection.stop(); } catch (Exception ignored) {}
