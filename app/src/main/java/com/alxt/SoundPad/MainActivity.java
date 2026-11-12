@@ -32,6 +32,7 @@ public class MainActivity extends Activity {
     private SeekBar rateSeek, pitchSeek;
     private volatile AudioTrack playback;
     private volatile boolean playbackRunning;
+    private Thread playbackThread;
     private SharedPreferences prefs;
     private AudioManager audioManager;
     private final android.content.BroadcastReceiver captureStatusReceiver = new android.content.BroadcastReceiver() {
