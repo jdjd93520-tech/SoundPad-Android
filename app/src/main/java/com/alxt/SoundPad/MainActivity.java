@@ -23,8 +23,8 @@ public class MainActivity extends Activity {
     private static final String PREFS = "soundpad_audio_settings";
     private static final String PREF_MONITOR = "monitor_enabled";
     private static final String PREF_OUTPUT = "output_device_id";
-    private static final String PREF_TTS_ENGINE = "tts_engine";
-    private static final String PREF_TTS_VOICE = "tts_voice";
+    private static final String PREF_FLOAT_LOCKED = "floating_panel_locked";
+    public static final String ACTION_FLOAT_SET_LOCK = "com.alxt.SoundPad.FLOAT_SET_LOCK";
     private static final String PREF_TTS_RATE = "tts_rate";
     private static final String PREF_TTS_PITCH = "tts_pitch";
     public static final String ACTION_FLOAT_START_RECORD = "com.alxt.SoundPad.FLOAT_START_RECORD";
@@ -33,9 +33,7 @@ public class MainActivity extends Activity {
     private EditText words, link;
     private TextView status, routeStatus;
     private Switch monitorSwitch;
-    private Spinner voiceSelector;
     private SeekBar rateSeek, pitchSeek;
-    private TextView voiceStatus;
     private volatile AudioTrack playback;
     private volatile boolean playbackRunning;
     private SharedPreferences prefs;
@@ -62,78 +60,35 @@ public class MainActivity extends Activity {
             tts.speak(s,android.speech.tts.TextToSpeech.QUEUE_FLUSH,null,"soundpad");
         });
         button(root,"STOP SPEAKING",v -> { if(tts!=null) tts.stop(); });
-        button(root,"CONNECT CLONETTS VOICE ENGINE",v -> connectCloneTts());
-        button(root,"USE PHONE DEFAULT TTS",v -> { prefs.edit().putString(PREF_TTS_ENGINE,"").apply(); initTts(null); });
-        button(root,"OPEN CLONETTS VOICE MANAGER",v -> openCloneTts());
-        button(root,"REFRESH AVAILABLE VOICES",v -> refreshTtsVoices());
-        voiceStatus=new TextView(this); voiceStatus.setText("Voice: loading…"); root.addView(voiceStatus);
-        voiceSelector=new Spinner(this); root.addView(voiceSelector);
-        voiceSelector.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
-            @Override public void onItemSelected(android.widget.AdapterView<?> parent,android.view.View view,int position,long id){
-                Object item=parent.getItemAtPosition(position);
-                if(item==null||tts==null)return;
-                String name=item.toString();
-                for(android.speech.tts.Voice voice:tts.getVoices()){
-                    if(voice.getName().equals(name)){
-                        int result=tts.setVoice(voice);
-                        if(result==android.speech.tts.TextToSpeech.SUCCESS){
-                            prefs.edit().putString(PREF_TTS_VOICE,name).apply();
-                            voiceStatus.setText("Selected voice: "+name);
-                        }else voiceStatus.setText("This engine did not accept the selected voice.");
-                        break;
-                    }
-                }
-            }
-            @Override public void onNothingSelected(android.widget.AdapterView<?> parent){}
-        });
         TextView rateLabel=new TextView(this); rateLabel.setText("Speech speed"); root.addView(rateLabel);
         rateSeek=new SeekBar(this); rateSeek.setMax(15); rateSeek.setProgress(Math.max(0,Math.min(15,prefs.getInt(PREF_TTS_RATE,10)-5))); root.addView(rateSeek);
         TextView pitchLabel=new TextView(this); pitchLabel.setText("Voice pitch"); root.addView(pitchLabel);
         pitchSeek=new SeekBar(this); pitchSeek.setMax(15); pitchSeek.setProgress(Math.max(0,Math.min(15,prefs.getInt(PREF_TTS_PITCH,10)-5))); root.addView(pitchSeek);
         rateSeek.setOnSeekBarChangeListener(ttsSettingListener(PREF_TTS_RATE));
         pitchSeek.setOnSeekBarChangeListener(ttsSettingListener(PREF_TTS_PITCH));
-        TextView cloneInfo=new TextView(this);
-        cloneInfo.setText("CloneTTS integration uses its installed Android TTS engine. Install CloneTTS separately, create a voice from a saved WAV sample and its exact transcript, then connect the engine here. SoundPad does not copy or bundle CloneTTS's private app code or model files.");
-        root.addView(cloneInfo);
-
         section(root,"Internal audio recording");
         button(root,"START INTERNAL AUDIO RECORDING",v -> requestCapture());
         button(root,"STOP INTERNAL AUDIO RECORDING",v -> { stopService(new Intent(this,CaptureService.class).setAction("STOP")); status.setText("Stopped internal audio recording."); });
         button(root,"PLAY INTERNAL AUDIO RECORDING",v -> playRecording());
         button(root,"STOP RECORDING PLAYBACK",v -> stopPlayback());
         button(root,"SAVE RECORDING TO DOWNLOADS",v -> saveRecording());
-        button(root,"SAVE VOICE SAMPLE & OPEN CLONETTS",v -> {
-            saveRecording();
-            status.setText("WAV saved to Downloads. In CloneTTS choose Voices > Add Voice > External Select, select the WAV, enter its exact transcript, save the profile, then return and connect CloneTTS.");
-            openCloneTts();
-        });
         TextView captureInfo=new TextView(this); captureInfo.setText("Android screen-capture permission is required. Only apps that allow playback capture can be recorded."); root.addView(captureInfo);
-
-        section(root,"Audio relay & routing settings");
-        routeStatus=new TextView(this); root.addView(routeStatus); updateRouteStatus();
-        monitorSwitch=new Switch(this); monitorSwitch.setText("Monitor captured audio through selected output"); monitorSwitch.setChecked(prefs.getBoolean(PREF_MONITOR,true)); root.addView(monitorSwitch);
-        monitorSwitch.setOnCheckedChangeListener((button,checked)->{
-            prefs.edit().putBoolean(PREF_MONITOR,checked).apply();
-            sendCaptureSetting("SET_MONITOR", "monitor_enabled", checked);
-            status.setText(checked?"Live audio monitoring enabled.":"Live audio monitoring disabled.");
-        });
-        button(root,"CHOOSE AUDIO OUTPUT DEVICE",v->chooseOutputDevice());
-        button(root,"SWAP OUTPUT DEVICE",v->cycleOutputDevice());
-        button(root,"RESET TO SYSTEM AUDIO ROUTING",v->{
-            prefs.edit().putInt(PREF_OUTPUT,0).apply();
-            applyOutputRoute(0);
-            status.setText("Using Android system-default output.");
-            updateRouteStatus();
-        });
-        button(root,"PLAY AN AUDIO FILE THROUGH SELECTED OUTPUT",v->pickAudioFile());
-        TextView routeInfo=new TextView(this);
-        routeInfo.setText("Input source: Android internal app playback capture (MediaProjection). Output selection applies to SoundPad monitoring and SoundPad file playback. Android does not let an ordinary app replace PUBG's microphone input.");
-        root.addView(routeInfo);
 
         section(root,"Floating controls");
         button(root,"START FLOATING DISPLAY",v -> startFloating());
         button(root,"STOP FLOATING DISPLAY",v -> { stopService(new Intent(this,FloatingSoundboardService.class).setAction(FloatingSoundboardService.STOP)); status.setText("Floating display stopped."); });
-        TextView floatInfo=new TextView(this); floatInfo.setText("Use UNLOCK to move the panel, LOCK to keep it in place, and X to close it."); root.addView(floatInfo);
+        Button lockButton=new Button(this);
+        lockButton.setText(prefs.getBoolean(PREF_FLOAT_LOCKED,true)?"UNLOCK FLOATING PANEL":"LOCK FLOATING PANEL");
+        root.addView(lockButton,new LinearLayout.LayoutParams(-1,-2));
+        lockButton.setOnClickListener(v->{
+            boolean locked=!prefs.getBoolean(PREF_FLOAT_LOCKED,true);
+            prefs.edit().putBoolean(PREF_FLOAT_LOCKED,locked).apply();
+            lockButton.setText(locked?"UNLOCK FLOATING PANEL":"LOCK FLOATING PANEL");
+            Intent lockIntent=new Intent(this,FloatingSoundboardService.class).setAction(ACTION_FLOAT_SET_LOCK).putExtra(PREF_FLOAT_LOCKED,locked);
+            try{startService(lockIntent);}catch(Exception ignored){}
+            status.setText(locked?"Floating panel locked.":"Floating panel unlocked; drag it to move.");
+        });
+        TextView floatInfo=new TextView(this); floatInfo.setText("Change the floating panel lock here in SoundPad settings. Use the X on the floating panel to close it."); root.addView(floatInfo);
 
         section(root,"Open audio link");
         link=new EditText(this); link.setHint("Paste a YouTube, SoundCloud or direct audio link"); link.setSingleLine(true); root.addView(link);
@@ -142,15 +97,7 @@ public class MainActivity extends Activity {
 
         setContentView(scroll);
         handleFloatingAction(getIntent());
-        String savedEngine=prefs.getString(PREF_TTS_ENGINE,"");
-        if(CLONETTS_PACKAGE.equals(savedEngine)&&isCloneTtsInstalled())initTts(CLONETTS_PACKAGE);else initTts(null);
-    }
-
-    private static final String CLONETTS_PACKAGE = "com.sipeter.clonetts";
-
-    private boolean isCloneTtsInstalled(){
-        try { getPackageManager().getPackageInfo(CLONETTS_PACKAGE,0); return true; }
-        catch (Exception ignored) { return false; }
+        initTts();
     }
 
     private android.widget.SeekBar.OnSeekBarChangeListener ttsSettingListener(String key){
@@ -168,70 +115,8 @@ public class MainActivity extends Activity {
         tts.setSpeechRate(rate);tts.setPitch(pitch);
     }
 
-    private void refreshTtsVoices(){
-        if(tts==null){if(voiceStatus!=null)voiceStatus.setText("TTS engine is not ready.");return;}
-        java.util.ArrayList<String> names=new java.util.ArrayList<>();
-        java.util.Set<android.speech.tts.Voice> voices=tts.getVoices();
-        if(voices!=null)for(android.speech.tts.Voice voice:voices)names.add(voice.getName());
-        java.util.Collections.sort(names);
-        if(voiceSelector!=null){
-            voiceSelector.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,names));
-            String saved=prefs.getString(PREF_TTS_VOICE,"");
-            if(!saved.isEmpty()){int index=names.indexOf(saved);if(index>=0)voiceSelector.setSelection(index);}
-        }
-        if(voiceStatus!=null)voiceStatus.setText(names.isEmpty()?"No selectable voices reported by this TTS engine.":"Available voices: "+names.size());
-    }
-
-    private void connectCloneTts(){
-        if(!isCloneTtsInstalled()){
-            status.setText("CloneTTS is not installed. Install CloneTTS v0.7.1, create your voice profile, then connect again.");
-            return;
-        }
-        prefs.edit().putString(PREF_TTS_ENGINE,CLONETTS_PACKAGE).apply();
-        initTts(CLONETTS_PACKAGE);
-    }
-
-    private void openCloneTts(){
-        if(!isCloneTtsInstalled()){
-            status.setText("CloneTTS is not installed. Install CloneTTS first.");
-            return;
-        }
-        Intent launch=getPackageManager().getLaunchIntentForPackage(CLONETTS_PACKAGE);
-        if(launch!=null){
-            launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            startActivity(launch);
-            status.setText("Opened CloneTTS. Import the saved WAV under Voices > Add Voice > External Select.");
-        }else status.setText("CloneTTS is installed, but Android did not provide its launch activity.");
-    }
-
-    private void initTts(String enginePackage){
-        if(tts!=null){
-            try{tts.stop();tts.shutdown();}catch(Exception ignored){}
-            tts=null;
-        }
-        final String requestedEngine=enginePackage;
-        if(requestedEngine!=null && !isCloneTtsInstalled()){
-            status.setText("CloneTTS is not installed.");
-            return;
-        }
-        android.speech.tts.TextToSpeech.OnInitListener listener=result->runOnUiThread(()->{
-            if(result==android.speech.tts.TextToSpeech.SUCCESS && tts!=null){
-                int lang=tts.setLanguage(Locale.getDefault());
-                if(lang==android.speech.tts.TextToSpeech.LANG_MISSING_DATA || lang==android.speech.tts.TextToSpeech.LANG_NOT_SUPPORTED) tts.setLanguage(Locale.US);
-                applyTtsSettings();
-                refreshTtsVoices();
-                status.setText(requestedEngine==null?"Android system TTS ready.":"CloneTTS voice engine connected. Choose your saved CloneTTS voice above, then press SPEAK TEXT.");
-            }else if(requestedEngine!=null){
-                status.setText("CloneTTS could not initialize. Falling back to Android system TTS.");
-                initTts(null);
-            }else status.setText("Text-to-speech could not initialize.");
-        });
-        tts=requestedEngine==null
-            ? new android.speech.tts.TextToSpeech(this,listener)
-            : new android.speech.tts.TextToSpeech(this,listener,requestedEngine);
-    }
-
     private void updateRouteStatus(){
+        if(routeStatus==null)return;
         int id=prefs.getInt(PREF_OUTPUT,0);
         if(id==0){routeStatus.setText("Output: Android system default");return;}
         AudioDeviceInfo d=findOutput(id);
@@ -316,7 +201,7 @@ public class MainActivity extends Activity {
             startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,Uri.parse("package:"+getPackageName())));
             status.setText("Allow display over other apps, then tap START FLOATING DISPLAY again.");return;
         }
-        Intent i=new Intent(this,FloatingSoundboardService.class).setAction(FloatingSoundboardService.START);
+        Intent i=new Intent(this,FloatingSoundboardService.class).setAction(FloatingSoundboardService.START).putExtra(PREF_FLOAT_LOCKED,prefs.getBoolean(PREF_FLOAT_LOCKED,true));
         if(Build.VERSION.SDK_INT>=26)startForegroundService(i);else startService(i);
         status.setText("Floating controls started.");
     }
@@ -352,7 +237,9 @@ public class MainActivity extends Activity {
     }
     private File captureFile(){return new File(getFilesDir(),"capture.pcm");}
     private void playRecording(){
-        stopPlayback();File f=captureFile();if(!f.exists()||f.length()==0){status.setText("No recording found. Record and stop first.");return;}
+        stopPlayback();
+        File f=captureFile();
+        if(!f.exists()||f.length()==0){status.setText("No recording found. Start and stop an internal recording first.");return;}
         playbackRunning=true;
         new Thread(()->{
             int min=AudioTrack.getMinBufferSize(RATE,AudioFormat.CHANNEL_OUT_STEREO,AudioFormat.ENCODING_PCM_16BIT);AudioTrack track=null;
@@ -360,10 +247,15 @@ public class MainActivity extends Activity {
                 track=new AudioTrack.Builder().setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
                 .setAudioFormat(new AudioFormat.Builder().setSampleRate(RATE).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).setEncoding(AudioFormat.ENCODING_PCM_16BIT).build())
                 .setBufferSizeInBytes(Math.max(min*2,32768)).setTransferMode(AudioTrack.MODE_STREAM).build();
+                if(track.getState()!=AudioTrack.STATE_INITIALIZED)throw new IOException("Audio output could not initialize");
                 int outputId=prefs.getInt(PREF_OUTPUT,0);AudioDeviceInfo preferred=findOutput(outputId);if(preferred!=null)track.setPreferredDevice(preferred);
-                playback=track;track.play();byte[] b=new byte[16384];int n;while(playbackRunning&&(n=in.read(b))>0)track.write(b,0,n);
+                playback=track;track.play();byte[] b=new byte[16384];int n;
+                while(playbackRunning&&(n=in.read(b))>0){
+                    int offset=0;
+                    while(playbackRunning&&offset<n){int written=track.write(b,offset,n-offset,AudioTrack.WRITE_BLOCKING);if(written<0)throw new IOException("Audio output write failed: "+written);offset+=written;}
+                }
             }catch(Exception e){runOnUiThread(()->status.setText("Playback failed: "+e.getMessage()));}
-            finally{if(track!=null){try{track.stop();}catch(Exception ignored){}track.release();}playback=null;playbackRunning=false;}
+            finally{if(track!=null){try{track.pause();track.flush();track.stop();}catch(Exception ignored){}try{track.release();}catch(Exception ignored){}}playback=null;playbackRunning=false;}
         },"SoundPad-recording-playback").start();status.setText("Playing internal audio recording.");
     }
     private void stopPlayback(){playbackRunning=false;AudioTrack t=playback;playback=null;if(t!=null){try{t.stop();}catch(Exception ignored){}t.release();}status.setText("Recording playback stopped.");}
