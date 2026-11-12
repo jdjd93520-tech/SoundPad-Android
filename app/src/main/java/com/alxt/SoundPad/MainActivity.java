@@ -35,7 +35,7 @@ public class MainActivity extends Activity {
     private android.speech.tts.TextToSpeech tts;
     private EditText words, link;
     private TextView status, routeStatus;
-    private Switch monitorSwitch;
+    private Switch monitorSwitch, injectionForwardSwitch;
     private SeekBar rateSeek, pitchSeek;
     private volatile AudioTrack playback;
     private volatile boolean playbackRunning;
@@ -91,7 +91,7 @@ public class MainActivity extends Activity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(24,22,24,22);
         ScrollView scroll = new ScrollView(this); scroll.addView(root);
-        TextView title = new TextView(this); title.setText("SoundPad 3.7"); title.setTextSize(28); root.addView(title);
+        TextView title = new TextView(this); title.setText("SoundPad 3.9"); title.setTextSize(28); root.addView(title);
         status = new TextView(this); status.setText("Ready"); root.addView(status);
 
         section(root,"Text to speech");
@@ -124,6 +124,12 @@ public class MainActivity extends Activity {
         TextView injectionInfo=new TextView(this);
         injectionInfo.setText("Connect Shizuku first, then start internal-audio recording. Eligible captured playback is sent to Android microphone capture paths. Android 13+ required; device/game support is not guaranteed.");
         root.addView(injectionInfo);
+        injectionForwardSwitch = new Switch(this);
+        injectionForwardSwitch.setText("Forward captured audio to microphone (experimental)");
+        injectionForwardSwitch.setChecked(prefs.getBoolean("forward_to_mic", false));
+        injectionForwardSwitch.setOnCheckedChangeListener((view, checked) ->
+            prefs.edit().putBoolean("forward_to_mic", checked).apply());
+        root.addView(injectionForwardSwitch);
 
         section(root,"Open audio link");
         link=new EditText(this); link.setHint("Paste a YouTube, SoundCloud or direct audio link"); link.setSingleLine(true); root.addView(link);
@@ -346,7 +352,7 @@ public class MainActivity extends Activity {
             Intent i=new Intent(this,CaptureService.class).setAction("START").putExtra("code",result).putExtra("data",data);
             ParcelFileDescriptor capturePipeWriter = null;
             boolean injectionStarted = false;
-            if (injectionService != null) {
+            if (injectionService != null && injectionForwardSwitch != null && injectionForwardSwitch.isChecked()) {
                 ParcelFileDescriptor[] pipe = null;
                 try {
                     pipe = ParcelFileDescriptor.createPipe();
