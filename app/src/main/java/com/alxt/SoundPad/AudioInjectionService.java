@@ -5,6 +5,7 @@ import android.content.pm.ApplicationInfo;
 import android.media.AudioAttributes;
 import android.media.AudioFormat;
 import android.media.AudioManager;
+import android.media.MediaRecorder;
 import android.media.AudioRecordingConfiguration;
 import android.media.AudioTrack;
 import android.os.Build;
@@ -69,19 +70,25 @@ public final class AudioInjectionService extends IAudioInjectionService.Stub {
                     + "Expected Global, BGMI, Korean or Vietnamese package.");
             }
 
+            // Follow MicInjector's proven Android 13+ injector pattern: match the
+            // recorder capture preset, rather than relying only on RULE_MATCH_UID.
+            // PUBG may open its voice recorder as MIC or VOICE_COMMUNICATION;
+            // CAMCORDER is retained for apps that use that preset.
             Class<?> ruleBuilderClass = Class.forName("android.media.audiopolicy.AudioMixingRule$Builder");
             Object ruleBuilder = ruleBuilderClass.getDeclaredConstructor().newInstance();
             Method setRole = ruleBuilderClass.getDeclaredMethod("setTargetMixRole", int.class);
             setRole.setAccessible(true);
-            setRole.invoke(ruleBuilder, 1); // MIX_ROLE_INJECTOR; rules match recording clients.
+            setRole.invoke(ruleBuilder, 1); // MIX_ROLE_INJECTOR
 
-            Field uidRuleField = Class.forName("android.media.audiopolicy.AudioMixingRule")
-                .getDeclaredField("RULE_MATCH_UID");
-            uidRuleField.setAccessible(true);
-            int matchUidRule = uidRuleField.getInt(null);
+            Field presetRuleField = Class.forName("android.media.audiopolicy.AudioMixingRule")
+                .getDeclaredField("RULE_MATCH_ATTRIBUTE_CAPTURE_PRESET");
+            presetRuleField.setAccessible(true);
+            int matchCapturePresetRule = presetRuleField.getInt(null);
             Method addRule = ruleBuilderClass.getDeclaredMethod("addMixRule", int.class, Object.class);
             addRule.setAccessible(true);
-            for (Integer uid : targetUids) addRule.invoke(ruleBuilder, matchUidRule, uid);
+            addCapturePresetRule(ruleBuilder, addRule, matchCapturePresetRule, MediaRecorder.AudioSource.MIC);
+            addCapturePresetRule(ruleBuilder, addRule, matchCapturePresetRule, MediaRecorder.AudioSource.VOICE_COMMUNICATION);
+            addCapturePresetRule(ruleBuilder, addRule, matchCapturePresetRule, MediaRecorder.AudioSource.CAMCORDER);
 
             Object rule = ruleBuilderClass.getDeclaredMethod("build").invoke(ruleBuilder);
             Class<?> mixBuilderClass = Class.forName("android.media.audiopolicy.AudioMix$Builder");
@@ -190,6 +197,18 @@ public final class AudioInjectionService extends IAudioInjectionService.Stub {
             Log.e(TAG, status, error);
             return status;
         }
+    }
+
+    private static void addCapturePresetRule(
+        Object ruleBuilder, Method addRule, int ruleType, int capturePreset
+    ) throws Exception {
+        AudioAttributes.Builder attributesBuilder = new AudioAttributes.Builder();
+        Method setCapturePreset = AudioAttributes.Builder.class.getDeclaredMethod(
+            "setCapturePreset", int.class
+        );
+        setCapturePreset.setAccessible(true);
+        setCapturePreset.invoke(attributesBuilder, capturePreset);
+        addRule.invoke(ruleBuilder, ruleType, attributesBuilder.build());
     }
 
     // getClientUid() is hidden from the public Android SDK stubs.
