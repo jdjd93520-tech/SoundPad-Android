@@ -67,9 +67,9 @@ public class MainActivity extends Activity {
         });
         button(root,"STOP SPEAKING",v -> { if(tts!=null) tts.stop(); });
         TextView rateLabel=new TextView(this); rateLabel.setText("Speech speed"); root.addView(rateLabel);
-        rateSeek=new SeekBar(this); rateSeek.setMax(15); rateSeek.setProgress(Math.max(0,Math.min(15,prefs.getInt(PREF_TTS_RATE,10)-5))); root.addView(rateSeek);
+        rateSeek=new SeekBar(this); rateSeek.setMax(35); rateSeek.setProgress(Math.max(0,Math.min(35,(prefs.getInt(PREF_TTS_RATE,100)-25)/5))); root.addView(rateSeek);
         TextView pitchLabel=new TextView(this); pitchLabel.setText("Voice pitch"); root.addView(pitchLabel);
-        pitchSeek=new SeekBar(this); pitchSeek.setMax(15); pitchSeek.setProgress(Math.max(0,Math.min(15,prefs.getInt(PREF_TTS_PITCH,10)-5))); root.addView(pitchSeek);
+        pitchSeek=new SeekBar(this); pitchSeek.setMax(35); pitchSeek.setProgress(Math.max(0,Math.min(35,(prefs.getInt(PREF_TTS_PITCH,100)-25)/5))); root.addView(pitchSeek);
         rateSeek.setOnSeekBarChangeListener(ttsSettingListener(PREF_TTS_RATE));
         pitchSeek.setOnSeekBarChangeListener(ttsSettingListener(PREF_TTS_PITCH));
         section(root,"Internal audio recording");
@@ -91,7 +91,7 @@ public class MainActivity extends Activity {
 
     private android.widget.SeekBar.OnSeekBarChangeListener ttsSettingListener(String key){
         return new android.widget.SeekBar.OnSeekBarChangeListener(){
-            public void onProgressChanged(SeekBar bar,int progress,boolean fromUser){if(fromUser){prefs.edit().putInt(key,progress+5).apply();applyTtsSettings();}}
+            public void onProgressChanged(SeekBar bar,int progress,boolean fromUser){if(fromUser){prefs.edit().putInt(key,25+progress*5).apply();applyTtsSettings(); AudioTrack active=playback; if(active!=null && key.equals(PREF_TTS_PITCH)){try{active.setPlaybackRate(Math.max(8000,Math.min(192000,(int)(RATE*(25+progress*5)/100.0f))));}catch(Exception ignored){}}}}
             public void onStartTrackingTouch(SeekBar bar){}
             public void onStopTrackingTouch(SeekBar bar){}
         };
@@ -99,8 +99,8 @@ public class MainActivity extends Activity {
 
     private void applyTtsSettings(){
         if(tts==null)return;
-        float rate=prefs.getInt(PREF_TTS_RATE,10)/10.0f;
-        float pitch=prefs.getInt(PREF_TTS_PITCH,10)/10.0f;
+        float rate=prefs.getInt(PREF_TTS_RATE,100)/100.0f;
+        float pitch=prefs.getInt(PREF_TTS_PITCH,100)/100.0f;
         tts.setSpeechRate(rate);tts.setPitch(pitch);
     }
 
@@ -267,6 +267,8 @@ public class MainActivity extends Activity {
                 AudioDeviceInfo preferred=findOutput(prefs.getInt(PREF_OUTPUT,0));
                 if(preferred!=null)track.setPreferredDevice(preferred);
                 playback=track;
+                int pitchPercent=prefs.getInt(PREF_TTS_PITCH,100);
+                track.setPlaybackRate(Math.max(8000,Math.min(192000,(int)(RATE*pitchPercent/100.0f))));
                 track.play();
                 byte[] buffer=new byte[8192];
                 int n;
