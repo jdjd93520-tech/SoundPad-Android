@@ -15,6 +15,7 @@ import android.widget.LinearLayout;
 import android.widget.Toast;
 
 public class FloatingSoundboardService extends Service {
+    public static volatile boolean running=false;
     public static final String START="com.alxt.SoundPad.FLOAT_START", STOP="com.alxt.SoundPad.FLOAT_STOP";
     private static final String CHANNEL="soundpad_overlay";
     private WindowManager windowManager;
@@ -65,14 +66,14 @@ public class FloatingSoundboardService extends Service {
             if(event.getAction()==MotionEvent.ACTION_MOVE){params.x=startX+(int)event.getRawX()-touchX;params.y=startY+(int)event.getRawY()-touchY;try{windowManager.updateViewLayout(panel,params);}catch(Exception ignored){}return true;}
             return event.getAction()==MotionEvent.ACTION_UP;
         });
-        try{windowManager.addView(panel,params);}catch(Exception e){panel=null;stopForeground(true);stopSelf();}
+        try{windowManager.addView(panel,params);running=true;}catch(Exception e){panel=null;running=false;stopForeground(true);stopSelf();}
     }
     private void launchMain(String action){
         Intent i=new Intent(this,MainActivity.class).setAction(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_CLEAR_TOP|Intent.FLAG_ACTIVITY_SINGLE_TOP);
         try{startActivity(i);}catch(Exception e){Toast.makeText(this,"Open SoundPad to use this control.",Toast.LENGTH_SHORT).show();}
     }
     private Button button(String label,View.OnClickListener listener){Button b=new Button(this);b.setText(label);b.setTextSize(11);b.setOnClickListener(listener);return b;}
-    private void removePanel(){if(panel!=null&&windowManager!=null){try{windowManager.removeView(panel);}catch(Exception ignored){}panel=null;}}
+    private void removePanel(){if(panel!=null&&windowManager!=null){try{windowManager.removeView(panel);}catch(Exception ignored){}panel=null;}running=false;}
     @Override public void onDestroy(){removePanel();super.onDestroy();}
     @Override public IBinder onBind(Intent intent){return null;}
 }
