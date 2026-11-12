@@ -34,11 +34,20 @@ public class MainActivity extends Activity {
     private volatile boolean playbackRunning;
     private SharedPreferences prefs;
     private AudioManager audioManager;
+    private final android.content.BroadcastReceiver captureStatusReceiver = new android.content.BroadcastReceiver() {
+        @Override public void onReceive(android.content.Context context, Intent intent) {
+            String message = intent.getStringExtra("message");
+            if (message != null && status != null) status.setText(message);
+        }
+    };
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         prefs=getSharedPreferences(PREFS,MODE_PRIVATE);
         audioManager=(AudioManager)getSystemService(AUDIO_SERVICE);
+        android.content.IntentFilter captureFilter = new android.content.IntentFilter("com.alxt.SoundPad.CAPTURE_STATUS");
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(captureStatusReceiver, captureFilter, android.content.Context.RECEIVER_NOT_EXPORTED);
+        else registerReceiver(captureStatusReceiver, captureFilter);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(24,22,24,22);
@@ -232,7 +241,11 @@ public class MainActivity extends Activity {
                 playback=track;track.play();byte[] b=new byte[16384];int n;
                 while(playbackRunning&&(n=in.read(b))>0){
                     int offset=0;
-                    while(playbackRunning&&offset<n){int written=track.write(b,offset,n-offset,AudioTrack.WRITE_BLOCKING);if(written<0)throw new IOException("Audio output write failed: "+written);offset+=written;}
+                    while(playbackRunning&&offset<n){
+                        int written=track.write(b,offset,n-offset,AudioTrack.WRITE_BLOCKING);
+                        if(written<=0)throw new IOException("Audio output write failed: "+written);
+                        offset+=written;
+                    }
                 }
             }catch(Exception e){runOnUiThread(()->status.setText("Playback failed: "+e.getMessage()));}
             finally{if(track!=null){try{track.pause();track.flush();track.stop();}catch(Exception ignored){}try{track.release();}catch(Exception ignored){}}playback=null;playbackRunning=false;}
@@ -253,5 +266,10 @@ public class MainActivity extends Activity {
         ByteBuffer h=ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN);h.put(new byte[]{'R','I','F','F'}).putInt((int)(size+36)).put(new byte[]{'W','A','V','E','f','m','t',' '});
         h.putInt(16).putShort((short)1).putShort((short)2).putInt(RATE).putInt(RATE*4).putShort((short)4).putShort((short)16).put(new byte[]{'d','a','t','a'}).putInt((int)size);out.write(h.array());
     }
-    @Override protected void onDestroy(){stopPlayback();if(tts!=null){tts.stop();tts.shutdown();}super.onDestroy();}
+    @Override protected void onDestroy(){
+        try { unregisterReceiver(captureStatusReceiver); } catch (Exception ignored) {}
+        stopPlayback();
+        if(tts!=null){tts.stop();tts.shutdown();}
+        super.onDestroy();
+    }
 }
