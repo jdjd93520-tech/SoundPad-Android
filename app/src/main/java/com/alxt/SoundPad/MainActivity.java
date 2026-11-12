@@ -67,9 +67,9 @@ public class MainActivity extends Activity {
         });
         button(root,"STOP SPEAKING",v -> { if(tts!=null) tts.stop(); });
         TextView rateLabel=new TextView(this); rateLabel.setText("Speech speed"); root.addView(rateLabel);
-        rateSeek=new SeekBar(this); rateSeek.setMax(35); rateSeek.setProgress(Math.max(0,Math.min(35,(prefs.getInt(PREF_TTS_RATE,100)-25)/5))); root.addView(rateSeek);
+        rateSeek=new SeekBar(this); rateSeek.setMax(35); rateSeek.setProgress(Math.max(0,Math.min(35,(settingValue(PREF_TTS_RATE)-25)/5))); root.addView(rateSeek);
         TextView pitchLabel=new TextView(this); pitchLabel.setText("Voice pitch"); root.addView(pitchLabel);
-        pitchSeek=new SeekBar(this); pitchSeek.setMax(35); pitchSeek.setProgress(Math.max(0,Math.min(35,(prefs.getInt(PREF_TTS_PITCH,100)-25)/5))); root.addView(pitchSeek);
+        pitchSeek=new SeekBar(this); pitchSeek.setMax(35); pitchSeek.setProgress(Math.max(0,Math.min(35,(settingValue(PREF_TTS_PITCH)-25)/5))); root.addView(pitchSeek);
         rateSeek.setOnSeekBarChangeListener(ttsSettingListener(PREF_TTS_RATE));
         pitchSeek.setOnSeekBarChangeListener(ttsSettingListener(PREF_TTS_PITCH));
         section(root,"Internal audio recording");
@@ -97,10 +97,18 @@ public class MainActivity extends Activity {
         };
     }
 
+    private int settingValue(String key){
+        int value=prefs.getInt(key,100);
+        // Migrate SoundPad 3.7's 0.5x–2.0x values (stored as 5–20 tenths)
+        // into the expanded 0.25x–2.0x percentage scale.
+        if(value>0 && value<=20){value*=10;prefs.edit().putInt(key,value).apply();}
+        return Math.max(25,Math.min(200,value));
+    }
+
     private void applyTtsSettings(){
         if(tts==null)return;
-        float rate=prefs.getInt(PREF_TTS_RATE,100)/100.0f;
-        float pitch=prefs.getInt(PREF_TTS_PITCH,100)/100.0f;
+        float rate=settingValue(PREF_TTS_RATE)/100.0f;
+        float pitch=settingValue(PREF_TTS_PITCH)/100.0f;
         tts.setSpeechRate(rate);tts.setPitch(pitch);
     }
 
@@ -267,7 +275,7 @@ public class MainActivity extends Activity {
                 AudioDeviceInfo preferred=findOutput(prefs.getInt(PREF_OUTPUT,0));
                 if(preferred!=null)track.setPreferredDevice(preferred);
                 playback=track;
-                int pitchPercent=prefs.getInt(PREF_TTS_PITCH,100);
+                int pitchPercent=settingValue(PREF_TTS_PITCH);
                 track.setPlaybackRate(Math.max(8000,Math.min(192000,(int)(RATE*pitchPercent/100.0f))));
                 track.play();
                 byte[] buffer=new byte[8192];
