@@ -7,8 +7,8 @@ android {
         applicationId 'com.alxt.SoundPad'
         minSdk 29
         targetSdk 35
-        versionCode 10
-        versionName '2.8'
+        versionCode 11
+        versionName '2.9'
     }
     buildTypes {
         release {
@@ -17,7 +17,4 @@ android {
         }
     }
 }
-dependencies {
-    implementation 'dev.rikka.shizuku:api:13.1.5'
-    implementation 'dev.rikka.shizuku:provider:13.1.5'
-}
+dependencies { }
