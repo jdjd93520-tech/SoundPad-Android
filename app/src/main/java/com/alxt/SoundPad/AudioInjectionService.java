@@ -144,6 +144,7 @@ public final class AudioInjectionService extends IAudioInjectionService.Stub {
             if (track == audioTrack) track = null;
             if (audioPolicy == policy) audioPolicy = null;
             if (audioManager == manager) audioManager = null;
+            if (worker == Thread.currentThread()) worker = null;
         }
     }
 
@@ -153,17 +154,10 @@ public final class AudioInjectionService extends IAudioInjectionService.Stub {
         ParcelFileDescriptor pipe = inputPipe;
         inputPipe = null;
         closeQuietly(pipe);
-        AudioTrack active = track;
-        track = null;
-        if (active != null) {
-            try { active.stop(); } catch (Throwable ignored) {}
-            try { active.release(); } catch (Throwable ignored) {}
+        Thread activeWorker = worker;
+        if (activeWorker != null && activeWorker != Thread.currentThread()) {
+            try { activeWorker.join(1200); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
         }
-        AudioManager manager = audioManager;
-        Object policy = audioPolicy;
-        audioManager = null;
-        audioPolicy = null;
-        if (manager != null && policy != null) unregister(manager, policy);
         status = "Injection stopped";
     }
 
