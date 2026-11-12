@@ -21,6 +21,9 @@ import android.widget.*;
 import java.io.*;
 import java.util.Arrays;
 import java.util.Locale;
+import java.util.ArrayList;
+import android.provider.Settings;
+import rikka.shizuku.Shizuku;
 
 public class MainActivity extends Activity {
     private static final int REQ_CAPTURE = 8;
@@ -28,6 +31,12 @@ public class MainActivity extends Activity {
     private static final int REQ_SCREEN_CAPTURE = 10;
     private static final int REQ_AUDIO_FILE = 11;
     private static final int REQ_MIC_TEST = 12;
+    private static final int REQ_SOUNDBOARD_FILE = 13;
+    private static final int SHIZUKU_PERMISSION_REQUEST = 41;
+    private final ArrayList<Uri> soundboardSounds = new ArrayList<>();
+    private LinearLayout soundboardContainer;
+    private EditText soundSearch;
+    private final Shizuku.OnRequestPermissionResultListener shizukuPermissionListener = (requestCode, grantResult) -> runOnUiThread(this::updateShizukuStatus);
     private int pendingMicDeviceId = 0;
     private Uri selectedAudioUri;
     private static final int SAMPLE_RATE = 44100;
@@ -67,6 +76,34 @@ public class MainActivity extends Activity {
         status = new TextView(this);
         status.setText("Ready. Internal playback capture requires Android 10+ and the source app must allow capture.");
         root.addView(status);
+
+        TextView shizukuTitle = new TextView(this);
+        shizukuTitle.setText("\\nAdvanced compatibility");
+        shizukuTitle.setTextSize(20);
+        root.addView(shizukuTitle);
+        TextView shizukuStatus = new TextView(this);
+        shizukuStatus.setText("Shizuku: checking…");
+        root.addView(shizukuStatus);
+        addButton(root, "CHECK / REQUEST SHIZUKU ACCESS", v -> {
+            try {
+                if (!Shizuku.pingBinder()) {
+                    shizukuStatus.setText("Shizuku is not running. Start its service, then check again.");
+                } else if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
+                    shizukuStatus.setText("Shizuku permission granted. This does not guarantee system audio-injection privileges.");
+                } else {
+                    Shizuku.requestPermission(SHIZUKU_PERMISSION_REQUEST);
+                    shizukuStatus.setText("Permission request sent to Shizuku.");
+                }
+            } catch (Exception e) {
+                shizukuStatus.setText("Shizuku unavailable: " + e.getClass().getSimpleName());
+            }
+        });
+        addButton(root, "OPEN SHIZUKU APP", v -> {
+            try { startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse("https://shizuku.rikka.app/"))); }
+            catch (Exception e) { shizukuStatus.setText("Open the Shizuku app manually."); }
+        });
+        addButton(root, "REFRESH SHIZUKU STATUS", v -> updateShizukuStatus());
+        Shizuku.addRequestPermissionResultListener(shizukuPermissionListener);
 
         TextView bridgeTitle = new TextView(this);
         bridgeTitle.setText("\\nMicrophone & Audio Routing");
@@ -234,6 +271,43 @@ public class MainActivity extends Activity {
         TextView note = new TextView(this);
         note.setText("\nThe recording playback button lets you hear the captured audio. The saved profile changes the Android TTS pitch approximately; it does not clone the speaker's timbre or identity. Some TTS engines ignore pitch requests or have limited pitch ranges. Capture works only when Android and the source app permit playback capture.");
         root.addView(note);
+        TextView boardTitle = new TextView(this);
+        boardTitle.setText("\\nSoundboard");
+        boardTitle.setTextSize(20);
+        root.addView(boardTitle);
+        soundSearch = new EditText(this);
+        soundSearch.setHint("Search your soundboard…");
+        root.addView(soundSearch);
+        soundboardContainer = new LinearLayout(this);
+        soundboardContainer.setOrientation(LinearLayout.VERTICAL);
+        root.addView(soundboardContainer);
+        addButton(root, "ADD AUDIO FILE TO SOUNDBOARD", v -> {
+            Intent picker = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            picker.addCategory(Intent.CATEGORY_OPENABLE);
+            picker.setType("audio/*");
+            picker.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+            startActivityForResult(picker, REQ_SOUNDBOARD_FILE);
+        });
+        addButton(root, "SHOW FLOATING SOUNDBOARD", v -> {
+            if (Build.VERSION.SDK_INT >= 23 && !Settings.canDrawOverlays(this)) {
+                startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName())));
+                status.setText("Allow SoundPad to display over other apps, then press SHOW FLOATING SOUNDBOARD again.");
+                return;
+            }
+            Intent overlay = new Intent(this, FloatingSoundboardService.class).setAction(FloatingSoundboardService.START);
+            if (selectedAudioUri != null) overlay.putExtra(FloatingSoundboardService.EXTRA_URI, selectedAudioUri.toString());
+            startService(overlay);
+            status.setText("Floating controls started. Choose an audio file first for the PLAY button.");
+        });
+        addButton(root, "HIDE FLOATING SOUNDBOARD", v ->
+            startService(new Intent(this, FloatingSoundboardService.class).setAction(FloatingSoundboardService.STOP)));
+        loadSoundboard();
+        soundSearch.addTextChangedListener(new android.text.TextWatcher() {
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            public void onTextChanged(CharSequence s, int start, int before, int count) { renderSoundboard(s.toString()); }
+            public void afterTextChanged(android.text.Editable e) {}
+        });
+
         setContentView(scroll);
 
         tts = new TextToSpeech(this, result -> {
@@ -250,6 +324,61 @@ public class MainActivity extends Activity {
                 } else status.setText("No supported TTS language is installed. Install or enable a device TTS voice.");
             } else status.setText("TTS initialization failed. Check Android Text-to-speech settings.");
         });
+    }
+
+    private void updateShizukuStatus() {
+        try {
+            if (!Shizuku.pingBinder()) {
+                status.setText("Shizuku is not running. Start Shizuku and refresh status.");
+            } else if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
+                status.setText("Shizuku permission granted. Android may still restrict privileged audio-policy operations; virtual microphone routing is not guaranteed.");
+            } else {
+                status.setText("Shizuku is running, but SoundPad permission has not been granted.");
+            }
+        } catch (Exception e) {
+            status.setText("Shizuku status unavailable: " + e.getClass().getSimpleName());
+        }
+    }
+
+    private void loadSoundboard() {
+        soundboardSounds.clear();
+        java.util.Set<String> saved = getPreferences(0).getStringSet("soundboard_uris", new java.util.HashSet<>());
+        for (String value : new java.util.ArrayList<>(saved)) {
+            try { soundboardSounds.add(Uri.parse(value)); } catch (Exception ignored) {}
+        }
+        renderSoundboard("");
+    }
+
+    private void saveSoundboard() {
+        java.util.HashSet<String> values = new java.util.HashSet<>();
+        for (Uri uri : soundboardSounds) values.add(uri.toString());
+        getPreferences(0).edit().putStringSet("soundboard_uris", values).apply();
+    }
+
+    private void renderSoundboard(String query) {
+        if (soundboardContainer == null) return;
+        soundboardContainer.removeAllViews();
+        String needle = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
+        int shown = 0;
+        for (Uri uri : soundboardSounds) {
+            String label = uri.getLastPathSegment();
+            if (label == null || label.isEmpty()) label = "Audio clip " + (shown + 1);
+            if (!needle.isEmpty() && !label.toLowerCase(Locale.ROOT).contains(needle)) continue;
+            final Uri clip = uri;
+            addButton(soundboardContainer, "▶ " + label, v -> playSoundboardClip(clip));
+            shown++;
+        }
+        if (shown == 0) {
+            TextView empty = new TextView(this);
+            empty.setText(needle.isEmpty() ? "No sounds yet. Add audio files to build your soundboard." : "No matching sound clips.");
+            soundboardContainer.addView(empty);
+        }
+    }
+
+    private void playSoundboardClip(Uri uri) {
+        Intent play = new Intent(this, AudioBridgeService.class).setAction(AudioBridgeService.PLAY).setData(uri);
+        if (Build.VERSION.SDK_INT >= 26) startForegroundService(play); else startService(play);
+        status.setText("Playing selected sound through the phone's current audio output. This is not a system microphone feed.");
     }
 
     private void refreshInputDevices(java.util.ArrayList<android.media.AudioDeviceInfo> devices, java.util.ArrayList<String> labels) {
@@ -660,7 +789,18 @@ public class MainActivity extends Activity {
 
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
-        if (request == REQ_AUDIO_FILE && result == Activity.RESULT_OK && data != null) {
+        if (request == REQ_SOUNDBOARD_FILE && result == Activity.RESULT_OK && data != null) {
+            try {
+                Uri uri = data.getData();
+                if (uri != null) {
+                    getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    if (!soundboardSounds.contains(uri)) soundboardSounds.add(uri);
+                }
+            } catch (Exception ignored) {}
+            saveSoundboard();
+            renderSoundboard(soundSearch == null ? "" : soundSearch.getText().toString());
+            status.setText("Sound added to your local soundboard.");
+        } else if (request == REQ_AUDIO_FILE && result == Activity.RESULT_OK && data != null) {
             selectedAudioUri = data.getData();
             try { getContentResolver().takePersistableUriPermission(selectedAudioUri, Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Exception ignored) {}
             status.setText("Audio file selected. Play sends it to the current phone/Bluetooth output.");
@@ -686,6 +826,7 @@ public class MainActivity extends Activity {
     @Override protected void onDestroy() {
         stopPlayback();
         stopMicMonitor();
+        try { Shizuku.removeRequestPermissionResultListener(shizukuPermissionListener); } catch (Exception ignored) {}
         if (tts != null) { tts.stop(); tts.shutdown(); }
         super.onDestroy();
     }
