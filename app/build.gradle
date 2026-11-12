@@ -7,7 +7,7 @@ android {
         applicationId 'com.alxt.SoundPad'
         minSdk 29
         targetSdk 35
-        versionCode 13
+        versionCode 14
         versionName '3.1'
     }
     buildTypes {
