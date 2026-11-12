@@ -70,7 +70,7 @@ public class MainActivity extends Activity {
         button(root,"SWAP OUTPUT DEVICE",v->cycleOutputDevice());
         button(root,"RESET TO SYSTEM AUDIO ROUTING",v->{
             prefs.edit().putInt(PREF_OUTPUT,0).apply();
-            sendCaptureSetting("SET_OUTPUT_DEVICE","output_device_id",0);
+            applyOutputRoute(0);
             status.setText("Using Android system-default output.");
             updateRouteStatus();
         });
@@ -142,7 +142,7 @@ public class MainActivity extends Activity {
         new AlertDialog.Builder(this).setTitle("Choose audio output").setItems(labels.toArray(new String[0]),(dialog,which)->{
             int id=which==0?0:devices.get(which-1).getId();
             prefs.edit().putInt(PREF_OUTPUT,id).apply();
-            sendCaptureSetting("SET_OUTPUT_DEVICE","output_device_id",id);
+            applyOutputRoute(id);
             status.setText("Output route updated.");updateRouteStatus();
         }).setNegativeButton("Cancel",null).show();
     }
@@ -158,6 +158,11 @@ public class MainActivity extends Activity {
         prefs.edit().putInt(PREF_OUTPUT,next).apply();
         sendCaptureSetting("SET_OUTPUT_DEVICE","output_device_id",next);
         updateRouteStatus();status.setText("Output route switched.");
+    }
+    private void applyOutputRoute(int id){
+        sendCaptureSetting("SET_OUTPUT_DEVICE","output_device_id",id);
+        Intent bridge=new Intent(this,AudioBridgeService.class).setAction(AudioBridgeService.SET_OUTPUT_DEVICE).putExtra(AudioBridgeService.EXTRA_OUTPUT_DEVICE_ID,id);
+        try{startService(bridge);}catch(Exception ignored){}
     }
     private void sendCaptureSetting(String action,String key,boolean value){
         Intent i=new Intent(this,CaptureService.class).setAction(action).putExtra(key,value);
