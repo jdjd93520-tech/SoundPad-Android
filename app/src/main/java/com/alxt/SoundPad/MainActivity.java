@@ -348,6 +348,7 @@ public class MainActivity extends Activity {
                 try {
                     pipe = ParcelFileDescriptor.createPipe();
                     String injectionResult = injectionService.startInjection(pipe[0]);
+                    try { pipe[0].close(); } catch (Exception ignored) {}
                     if (injectionResult != null && injectionResult.startsWith("OK:")) {
                         i.putExtra("inject_pipe", pipe[1]);
                     } else {
