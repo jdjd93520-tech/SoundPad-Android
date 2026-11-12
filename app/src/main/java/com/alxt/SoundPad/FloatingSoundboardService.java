@@ -35,6 +35,13 @@ public class FloatingSoundboardService extends Service {
     }
     @Override public int onStartCommand(Intent intent,int flags,int startId){
         if(intent!=null&&STOP.equals(intent.getAction())){removePanel();stopForeground(true);stopSelf();return START_NOT_STICKY;}
+        if(intent!=null&&MainActivity.ACTION_FLOAT_SET_LOCK.equals(intent.getAction())){
+            locked=intent.getBooleanExtra("floating_panel_locked",true);
+            getSharedPreferences("soundpad_audio_settings",MODE_PRIVATE).edit().putBoolean("floating_panel_locked",locked).apply();
+            return START_NOT_STICKY;
+        }
+        if(intent!=null)locked=intent.getBooleanExtra("floating_panel_locked",
+            getSharedPreferences("soundpad_audio_settings",MODE_PRIVATE).getBoolean("floating_panel_locked",true));
         if(Build.VERSION.SDK_INT>=23&&!Settings.canDrawOverlays(this)){Toast.makeText(this,"Allow SoundPad to display over other apps first.",Toast.LENGTH_LONG).show();stopForeground(true);stopSelf();return START_NOT_STICKY;}
         if(panel==null)showPanel();
         return START_STICKY;
@@ -46,7 +53,6 @@ public class FloatingSoundboardService extends Service {
         panel.addView(button("PLAY INTERNAL AUDIO RECORDING",v->launchMain(MainActivity.ACTION_FLOAT_PLAY_RECORD)));
         panel.addView(button("STOP INTERNAL AUDIO RECORDING",v->stopService(new Intent(this,CaptureService.class).setAction("STOP"))));
         LinearLayout bottom=new LinearLayout(this);bottom.setOrientation(LinearLayout.HORIZONTAL);
-        bottom.addView(button("UNLOCK",v->{locked=!locked;((Button)v).setText(locked?"UNLOCK":"LOCK");Toast.makeText(this,locked?"Panel locked":"Panel unlocked — drag to move",Toast.LENGTH_SHORT).show();}));
         bottom.addView(button("X",v->{removePanel();stopForeground(true);stopSelf();}));
         panel.addView(bottom);
         int type=Build.VERSION.SDK_INT>=26?WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY:WindowManager.LayoutParams.TYPE_PHONE;
@@ -62,7 +68,7 @@ public class FloatingSoundboardService extends Service {
         try{windowManager.addView(panel,params);}catch(Exception e){panel=null;stopForeground(true);stopSelf();}
     }
     private void launchMain(String action){
-        Intent i=new Intent(this,MainActivity.class).setAction(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        Intent i=new Intent(this,MainActivity.class).setAction(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_CLEAR_TOP|Intent.FLAG_ACTIVITY_SINGLE_TOP);
         try{startActivity(i);}catch(Exception e){Toast.makeText(this,"Open SoundPad to use this control.",Toast.LENGTH_SHORT).show();}
     }
     private Button button(String label,View.OnClickListener listener){Button b=new Button(this);b.setText(label);b.setTextSize(11);b.setOnClickListener(listener);return b;}
