@@ -53,7 +53,7 @@ public class MainActivity extends Activity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(24,22,24,22);
         ScrollView scroll = new ScrollView(this); scroll.addView(root);
-        TextView title = new TextView(this); title.setText("SoundPad 3.4"); title.setTextSize(28); root.addView(title);
+        TextView title = new TextView(this); title.setText("SoundPad 3.6"); title.setTextSize(28); root.addView(title);
         status = new TextView(this); status.setText("Ready"); root.addView(status);
 
         section(root,"Text to speech");
