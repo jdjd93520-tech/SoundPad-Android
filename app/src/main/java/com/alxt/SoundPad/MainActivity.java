@@ -19,7 +19,7 @@ import java.util.ArrayList;
 import java.util.Locale;
 
 public class MainActivity extends Activity {
-    private static final int REQ_CAPTURE = 10, REQ_AUDIO_FILE = 11, RATE = 44100;
+    private static final int REQ_CAPTURE = 10, REQ_AUDIO_FILE = 11, REQ_RECORD_AUDIO = 12, RATE = 44100;
     private static final String PREFS = "soundpad_audio_settings";
     private static final String PREF_MONITOR = "monitor_enabled";
     private static final String PREF_OUTPUT = "output_device_id";
@@ -73,7 +73,7 @@ public class MainActivity extends Activity {
         pitchSeek.setOnSeekBarChangeListener(ttsSettingListener(PREF_TTS_PITCH));
         section(root,"Internal audio recording");
         button(root,"START INTERNAL AUDIO RECORDING",v -> requestCapture());
-        button(root,"STOP INTERNAL AUDIO RECORDING",v -> { stopService(new Intent(this,CaptureService.class).setAction("STOP")); status.setText("Stopped internal audio recording."); });
+        button(root,"STOP INTERNAL AUDIO RECORDING",v -> { startService(new Intent(this,CaptureService.class).setAction("STOP")); status.setText("Stopping recording and closing the audio file…"); });
         button(root,"PLAY INTERNAL AUDIO RECORDING",v -> playRecording());
         button(root,"STOP RECORDING PLAYBACK",v -> stopPlayback());
         button(root,"SAVE RECORDING TO DOWNLOADS",v -> saveRecording());
@@ -201,10 +201,27 @@ public class MainActivity extends Activity {
         try{startActivity(new Intent(Intent.ACTION_VIEW,u));status.setText("Opened link in its app or browser.");}
         catch(Exception e){status.setText("No app can open this link.");}
     }
+    // Restored from the Nov 8 working capture flow: Android requires RECORD_AUDIO
+    // permission in addition to the user's MediaProjection approval.
     private void requestCapture(){
         if(Build.VERSION.SDK_INT<29){status.setText("Internal audio capture requires Android 10 or newer.");return;}
+        if(Build.VERSION.SDK_INT>=23 && checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)!=android.content.pm.PackageManager.PERMISSION_GRANTED){
+            requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO},REQ_RECORD_AUDIO);
+            return;
+        }
+        launchCaptureConsent();
+    }
+    private void launchCaptureConsent(){
         MediaProjectionManager m=(MediaProjectionManager)getSystemService(MEDIA_PROJECTION_SERVICE);
+        if(m==null){status.setText("This Android device does not provide screen/audio capture.");return;}
         startActivityForResult(m.createScreenCaptureIntent(),REQ_CAPTURE);
+    }
+    @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results){
+        super.onRequestPermissionsResult(request,permissions,results);
+        if(request==REQ_RECORD_AUDIO){
+            if(results.length>0 && results[0]==android.content.pm.PackageManager.PERMISSION_GRANTED) launchCaptureConsent();
+            else status.setText("Microphone permission is required by Android for internal playback capture.");
+        }
     }
     @Override protected void onActivityResult(int req,int result,Intent data){
         super.onActivityResult(req,result,data);
@@ -225,33 +242,55 @@ public class MainActivity extends Activity {
         }else if(req==REQ_CAPTURE)status.setText("Recording permission was cancelled.");
     }
     private File captureFile(){return new File(getFilesDir(),"capture.pcm");}
+    // Playback implementation restored from the Nov 8 working recording build.
     private void playRecording(){
+        final File file=captureFile();
+        if(!file.exists()||file.length()<4){
+            status.setText("No recording file found yet. Record internal audio and press Stop recording first.");
+            return;
+        }
         stopPlayback();
-        File f=captureFile();
-        if(!f.exists()||f.length()==0){status.setText("No recording found. Start and stop an internal recording first.");return;}
         playbackRunning=true;
-        new Thread(()->{
-            int min=AudioTrack.getMinBufferSize(RATE,AudioFormat.CHANNEL_OUT_STEREO,AudioFormat.ENCODING_PCM_16BIT);AudioTrack track=null;
-            try(FileInputStream in=new FileInputStream(f)){
-                track=new AudioTrack.Builder().setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
-                .setAudioFormat(new AudioFormat.Builder().setSampleRate(RATE).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).setEncoding(AudioFormat.ENCODING_PCM_16BIT).build())
-                .setBufferSizeInBytes(Math.max(min*2,32768)).setTransferMode(AudioTrack.MODE_STREAM).build();
+        playbackThread=new Thread(()->{
+            AudioTrack track=null;
+            try(FileInputStream in=new FileInputStream(file)){
+                int min=AudioTrack.getMinBufferSize(RATE,AudioFormat.CHANNEL_OUT_STEREO,AudioFormat.ENCODING_PCM_16BIT);
+                int bufferSize=Math.max(min,16384);
+                track=new AudioTrack.Builder()
+                    .setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
+                    .setAudioFormat(new AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(RATE).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build())
+                    .setBufferSizeInBytes(bufferSize).setTransferMode(AudioTrack.MODE_STREAM).build();
                 if(track.getState()!=AudioTrack.STATE_INITIALIZED)throw new IOException("Audio output could not initialize");
-                int outputId=prefs.getInt(PREF_OUTPUT,0);AudioDeviceInfo preferred=findOutput(outputId);if(preferred!=null)track.setPreferredDevice(preferred);
-                playback=track;track.play();byte[] b=new byte[16384];int n;
-                while(playbackRunning&&(n=in.read(b))>0){
+                AudioDeviceInfo preferred=findOutput(prefs.getInt(PREF_OUTPUT,0));
+                if(preferred!=null)track.setPreferredDevice(preferred);
+                playback=track;
+                track.play();
+                byte[] buffer=new byte[8192];
+                int n;
+                while(playbackRunning&&(n=in.read(buffer))!=-1){
                     int offset=0;
                     while(playbackRunning&&offset<n){
-                        int written=track.write(b,offset,n-offset,AudioTrack.WRITE_BLOCKING);
-                        if(written<=0)throw new IOException("Audio output write failed: "+written);
-                        offset+=written;
+                        int wrote=track.write(buffer,offset,n-offset);
+                        if(wrote<0)throw new IOException("AudioTrack write error "+wrote);
+                        if(wrote==0)continue;
+                        offset+=wrote;
                     }
                 }
-            }catch(Exception e){runOnUiThread(()->status.setText("Playback failed: "+e.getMessage()));}
-            finally{if(track!=null){try{track.pause();track.flush();track.stop();}catch(Exception ignored){}try{track.release();}catch(Exception ignored){}}playback=null;playbackRunning=false;}
-        },"SoundPad-recording-playback").start();status.setText("Playing internal audio recording.");
+                runOnUiThread(()->status.setText("Recording playback finished."));
+            }catch(Exception e){
+                runOnUiThread(()->status.setText("Playback failed: "+e.getClass().getSimpleName()+": "+e.getMessage()));
+            }finally{
+                playbackRunning=false;
+                playback=null;
+                if(track!=null){try{track.stop();}catch(Exception ignored){}track.release();}
+            }
+        },"SoundPad-playback");
+        playbackThread.start();
+        status.setText("Playing saved internal audio…");
     }
-    private void stopPlayback(){playbackRunning=false;AudioTrack t=playback;playback=null;if(t!=null){try{t.stop();}catch(Exception ignored){}t.release();}status.setText("Recording playback stopped.");}
+    private void stopPlayback(){playbackRunning=false;AudioTrack t=playback;if(t!=null){try{t.pause();t.flush();}catch(Exception ignored){}}status.setText("Recording playback stopped.");}
     private void saveRecording(){
         File f=captureFile();if(!f.exists()||f.length()==0){status.setText("No recording available to save.");return;}
         try{
