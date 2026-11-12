@@ -156,7 +156,7 @@ public class MainActivity extends Activity {
             next=index<0||index+1>=devices.size()?0:devices.get(index+1).getId();
         }
         prefs.edit().putInt(PREF_OUTPUT,next).apply();
-        sendCaptureSetting("SET_OUTPUT_DEVICE","output_device_id",next);
+        applyOutputRoute(next);
         updateRouteStatus();status.setText("Output route switched.");
     }
     private void applyOutputRoute(int id){
