@@ -1,11 +1,14 @@
 package com.alxt.SoundPad;
 
+import android.annotation.SuppressLint;
+
 import android.content.Context;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 
 /** Minimal ActivityThread bootstrap used by scrcpy's shell-side AudioPolicy implementation. */
+@SuppressLint("BlockedPrivateApi")
 final class SystemContextWorkaround {
     private SystemContextWorkaround() {}
 
