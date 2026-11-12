@@ -3,19 +3,21 @@ plugins { id 'com.android.application' }
 android {
     namespace 'com.alxt.SoundPad'
     compileSdk 35
-
     defaultConfig {
         applicationId 'com.alxt.SoundPad'
         minSdk 29
         targetSdk 35
-        versionCode 9
-        versionName '2.7'
+        versionCode 10
+        versionName '2.8'
     }
-
     buildTypes {
         release {
             signingConfig signingConfigs.debug
             minifyEnabled false
         }
     }
+}
+dependencies {
+    implementation 'dev.rikka.shizuku:api:13.1.5'
+    implementation 'dev.rikka.shizuku:provider:13.1.5'
 }
