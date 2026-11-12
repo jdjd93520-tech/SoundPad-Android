@@ -23,12 +23,19 @@ public class MainActivity extends Activity {
     private static final String PREFS = "soundpad_audio_settings";
     private static final String PREF_MONITOR = "monitor_enabled";
     private static final String PREF_OUTPUT = "output_device_id";
+    private static final String PREF_TTS_ENGINE = "tts_engine";
+    private static final String PREF_TTS_VOICE = "tts_voice";
+    private static final String PREF_TTS_RATE = "tts_rate";
+    private static final String PREF_TTS_PITCH = "tts_pitch";
     public static final String ACTION_FLOAT_START_RECORD = "com.alxt.SoundPad.FLOAT_START_RECORD";
     public static final String ACTION_FLOAT_PLAY_RECORD = "com.alxt.SoundPad.FLOAT_PLAY_RECORD";
     private android.speech.tts.TextToSpeech tts;
     private EditText words, link;
     private TextView status, routeStatus;
     private Switch monitorSwitch;
+    private Spinner voiceSelector;
+    private SeekBar rateSeek, pitchSeek;
+    private TextView voiceStatus;
     private volatile AudioTrack playback;
     private volatile boolean playbackRunning;
     private SharedPreferences prefs;
@@ -47,10 +54,44 @@ public class MainActivity extends Activity {
 
         section(root,"Text to speech");
         words = new EditText(this); words.setHint("Type text here…"); words.setMinLines(3); words.setGravity(Gravity.TOP); root.addView(words);
-        button(root,"SPEAK TEXT",v -> { String s=words.getText().toString().trim(); if(s.isEmpty()){status.setText("Type something to speak.");return;} if(tts!=null) tts.speak(s,android.speech.tts.TextToSpeech.QUEUE_FLUSH,null,"soundpad"); });
+        button(root,"SPEAK TEXT",v -> {
+            String s=words.getText().toString().trim();
+            if(s.isEmpty()){status.setText("Type something to speak.");return;}
+            if(tts==null){status.setText("TTS engine is still starting. Try again in a moment.");return;}
+            applyTtsSettings();
+            tts.speak(s,android.speech.tts.TextToSpeech.QUEUE_FLUSH,null,"soundpad");
+        });
         button(root,"STOP SPEAKING",v -> { if(tts!=null) tts.stop(); });
         button(root,"CONNECT CLONETTS VOICE ENGINE",v -> connectCloneTts());
+        button(root,"USE PHONE DEFAULT TTS",v -> { prefs.edit().putString(PREF_TTS_ENGINE,"").apply(); initTts(null); });
         button(root,"OPEN CLONETTS VOICE MANAGER",v -> openCloneTts());
+        button(root,"REFRESH AVAILABLE VOICES",v -> refreshTtsVoices());
+        voiceStatus=new TextView(this); voiceStatus.setText("Voice: loading…"); root.addView(voiceStatus);
+        voiceSelector=new Spinner(this); root.addView(voiceSelector);
+        voiceSelector.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
+            @Override public void onItemSelected(android.widget.AdapterView<?> parent,android.view.View view,int position,long id){
+                Object item=parent.getItemAtPosition(position);
+                if(item==null||tts==null)return;
+                String name=item.toString();
+                for(android.speech.tts.Voice voice:tts.getVoices()){
+                    if(voice.getName().equals(name)){
+                        int result=tts.setVoice(voice);
+                        if(result==android.speech.tts.TextToSpeech.SUCCESS){
+                            prefs.edit().putString(PREF_TTS_VOICE,name).apply();
+                            voiceStatus.setText("Selected voice: "+name);
+                        }else voiceStatus.setText("This engine did not accept the selected voice.");
+                        break;
+                    }
+                }
+            }
+            @Override public void onNothingSelected(android.widget.AdapterView<?> parent){}
+        });
+        TextView rateLabel=new TextView(this); rateLabel.setText("Speech speed"); root.addView(rateLabel);
+        rateSeek=new SeekBar(this); rateSeek.setMax(15); rateSeek.setProgress(Math.max(0,Math.min(15,prefs.getInt(PREF_TTS_RATE,10)-5))); root.addView(rateSeek);
+        TextView pitchLabel=new TextView(this); pitchLabel.setText("Voice pitch"); root.addView(pitchLabel);
+        pitchSeek=new SeekBar(this); pitchSeek.setMax(15); pitchSeek.setProgress(Math.max(0,Math.min(15,prefs.getInt(PREF_TTS_PITCH,10)-5))); root.addView(pitchSeek);
+        rateSeek.setOnSeekBarChangeListener(ttsSettingListener(PREF_TTS_RATE));
+        pitchSeek.setOnSeekBarChangeListener(ttsSettingListener(PREF_TTS_PITCH));
         TextView cloneInfo=new TextView(this);
         cloneInfo.setText("CloneTTS integration uses its installed Android TTS engine. Install CloneTTS separately, create a voice from a saved WAV sample and its exact transcript, then connect the engine here. SoundPad does not copy or bundle CloneTTS's private app code or model files.");
         root.addView(cloneInfo);
@@ -61,7 +102,11 @@ public class MainActivity extends Activity {
         button(root,"PLAY INTERNAL AUDIO RECORDING",v -> playRecording());
         button(root,"STOP RECORDING PLAYBACK",v -> stopPlayback());
         button(root,"SAVE RECORDING TO DOWNLOADS",v -> saveRecording());
-        button(root,"SAVE VOICE SAMPLE & OPEN CLONETTS",v -> { saveRecording(); openCloneTts(); });
+        button(root,"SAVE VOICE SAMPLE & OPEN CLONETTS",v -> {
+            saveRecording();
+            status.setText("WAV saved to Downloads. In CloneTTS choose Voices > Add Voice > External Select, select the WAV, enter its exact transcript, save the profile, then return and connect CloneTTS.");
+            openCloneTts();
+        });
         TextView captureInfo=new TextView(this); captureInfo.setText("Android screen-capture permission is required. Only apps that allow playback capture can be recorded."); root.addView(captureInfo);
 
         section(root,"Audio relay & routing settings");
@@ -97,7 +142,8 @@ public class MainActivity extends Activity {
 
         setContentView(scroll);
         handleFloatingAction(getIntent());
-        initTts(null);
+        String savedEngine=prefs.getString(PREF_TTS_ENGINE,"");
+        if(CLONETTS_PACKAGE.equals(savedEngine)&&isCloneTtsInstalled())initTts(CLONETTS_PACKAGE);else initTts(null);
     }
 
     private static final String CLONETTS_PACKAGE = "com.sipeter.clonetts";
@@ -107,11 +153,41 @@ public class MainActivity extends Activity {
         catch (Exception ignored) { return false; }
     }
 
+    private android.widget.SeekBar.OnSeekBarChangeListener ttsSettingListener(String key){
+        return new android.widget.SeekBar.OnSeekBarChangeListener(){
+            public void onProgressChanged(SeekBar bar,int progress,boolean fromUser){if(fromUser){prefs.edit().putInt(key,progress+5).apply();applyTtsSettings();}}
+            public void onStartTrackingTouch(SeekBar bar){}
+            public void onStopTrackingTouch(SeekBar bar){}
+        };
+    }
+
+    private void applyTtsSettings(){
+        if(tts==null)return;
+        float rate=prefs.getInt(PREF_TTS_RATE,10)/10.0f;
+        float pitch=prefs.getInt(PREF_TTS_PITCH,10)/10.0f;
+        tts.setSpeechRate(rate);tts.setPitch(pitch);
+    }
+
+    private void refreshTtsVoices(){
+        if(tts==null){if(voiceStatus!=null)voiceStatus.setText("TTS engine is not ready.");return;}
+        java.util.ArrayList<String> names=new java.util.ArrayList<>();
+        java.util.Set<android.speech.tts.Voice> voices=tts.getVoices();
+        if(voices!=null)for(android.speech.tts.Voice voice:voices)names.add(voice.getName());
+        java.util.Collections.sort(names);
+        if(voiceSelector!=null){
+            voiceSelector.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,names));
+            String saved=prefs.getString(PREF_TTS_VOICE,"");
+            if(!saved.isEmpty()){int index=names.indexOf(saved);if(index>=0)voiceSelector.setSelection(index);}
+        }
+        if(voiceStatus!=null)voiceStatus.setText(names.isEmpty()?"No selectable voices reported by this TTS engine.":"Available voices: "+names.size());
+    }
+
     private void connectCloneTts(){
         if(!isCloneTtsInstalled()){
             status.setText("CloneTTS is not installed. Install CloneTTS v0.7.1, create your voice profile, then connect again.");
             return;
         }
+        prefs.edit().putString(PREF_TTS_ENGINE,CLONETTS_PACKAGE).apply();
         initTts(CLONETTS_PACKAGE);
     }
 
@@ -142,7 +218,9 @@ public class MainActivity extends Activity {
             if(result==android.speech.tts.TextToSpeech.SUCCESS && tts!=null){
                 int lang=tts.setLanguage(Locale.getDefault());
                 if(lang==android.speech.tts.TextToSpeech.LANG_MISSING_DATA || lang==android.speech.tts.TextToSpeech.LANG_NOT_SUPPORTED) tts.setLanguage(Locale.US);
-                status.setText(requestedEngine==null?"Android system TTS ready.":"CloneTTS voice engine connected. Select a saved CloneTTS voice in its app, then speak here.");
+                applyTtsSettings();
+                refreshTtsVoices();
+                status.setText(requestedEngine==null?"Android system TTS ready.":"CloneTTS voice engine connected. Choose your saved CloneTTS voice above, then press SPEAK TEXT.");
             }else if(requestedEngine!=null){
                 status.setText("CloneTTS could not initialize. Falling back to Android system TTS.");
                 initTts(null);
