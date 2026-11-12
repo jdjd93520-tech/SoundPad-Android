@@ -3,11 +3,17 @@ package com.alxt.SoundPad;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
+import android.content.ComponentName;
+import android.content.ServiceConnection;
+import android.content.pm.PackageManager;
 import android.content.SharedPreferences;
 import android.media.*;
 import android.media.projection.MediaProjectionManager;
 import android.net.Uri;
 import android.os.Build;
+import android.os.IBinder;
+import android.os.ParcelFileDescriptor;
+import android.os.RemoteException;
 import android.os.Bundle;
 import android.provider.MediaStore;
 import android.view.Gravity;
@@ -17,6 +23,7 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Locale;
+import rikka.shizuku.Shizuku;
 
 public class MainActivity extends Activity {
     private static final int REQ_CAPTURE = 10, REQ_AUDIO_FILE = 11, REQ_RECORD_AUDIO = 12, RATE = 44100;
@@ -35,6 +42,34 @@ public class MainActivity extends Activity {
     private Thread playbackThread;
     private SharedPreferences prefs;
     private AudioManager audioManager;
+    private static final int REQ_SHIZUKU_INJECTION = 31;
+    private IAudioInjectionService injectionService;
+    private boolean injectionBinding;
+    private final Shizuku.OnBinderReceivedListener shizukuBinderReceived = () -> {
+        if (status != null) status.setText("Shizuku connected. Tap Connect to enable microphone injection.");
+    };
+    private final Shizuku.OnBinderDeadListener shizukuBinderDead = () -> {
+        injectionService = null;
+        if (status != null) status.setText("Shizuku disconnected.");
+    };
+    private final Shizuku.OnRequestPermissionResultListener shizukuPermissionResult = this::onShizukuPermissionResult;
+    private final ServiceConnection injectionConnection = new ServiceConnection() {
+        @Override public void onServiceConnected(ComponentName name, IBinder binder) {
+            injectionService = IAudioInjectionService.Stub.asInterface(binder);
+            try { status.setText(injectionService.getStatus()); }
+            catch (RemoteException e) { status.setText("Shizuku service connected; status query failed."); }
+        }
+        @Override public void onServiceDisconnected(ComponentName name) {
+            injectionService = null;
+            injectionBinding = false;
+            if (status != null) status.setText("Shizuku injection service disconnected.");
+        }
+    };
+    private final Shizuku.UserServiceArgs injectionServiceArgs =
+        new Shizuku.UserServiceArgs(new ComponentName(BuildConfig.APPLICATION_ID, AudioInjectionService.class.getName()))
+            .daemon(false).processNameSuffix("audio-injector")
+            .debuggable(BuildConfig.DEBUG).version(BuildConfig.VERSION_CODE);
+
     private final android.content.BroadcastReceiver captureStatusReceiver = new android.content.BroadcastReceiver() {
         @Override public void onReceive(android.content.Context context, Intent intent) {
             String message = intent.getStringExtra("message");
@@ -49,6 +84,9 @@ public class MainActivity extends Activity {
         android.content.IntentFilter captureFilter = new android.content.IntentFilter("com.alxt.SoundPad.CAPTURE_STATUS");
         if (Build.VERSION.SDK_INT >= 33) registerReceiver(captureStatusReceiver, captureFilter, android.content.Context.RECEIVER_NOT_EXPORTED);
         else registerReceiver(captureStatusReceiver, captureFilter);
+        Shizuku.addBinderReceivedListenerSticky(shizukuBinderReceived);
+        Shizuku.addBinderDeadListener(shizukuBinderDead);
+        Shizuku.addRequestPermissionResultListener(shizukuPermissionResult);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(24,22,24,22);
@@ -79,6 +117,13 @@ public class MainActivity extends Activity {
         button(root,"STOP RECORDING PLAYBACK",v -> stopPlayback());
         button(root,"SAVE RECORDING TO DOWNLOADS",v -> saveRecording());
         TextView captureInfo=new TextView(this); captureInfo.setText("Android screen-capture permission is required. Only apps that allow playback capture can be recorded."); root.addView(captureInfo);
+
+        section(root,"Shizuku microphone injection");
+        button(root,"CONNECT SHIZUKU INJECTION",v -> connectShizukuInjection());
+        button(root,"STOP SHIZUKU INJECTION",v -> stopShizukuInjection());
+        TextView injectionInfo=new TextView(this);
+        injectionInfo.setText("Connect Shizuku first, then start internal-audio recording. Eligible captured playback is sent to Android microphone capture paths. Android 13+ required; device/game support is not guaranteed.");
+        root.addView(injectionInfo);
 
         section(root,"Open audio link");
         link=new EditText(this); link.setHint("Paste a YouTube, SoundCloud or direct audio link"); link.setSingleLine(true); root.addView(link);
@@ -212,6 +257,59 @@ public class MainActivity extends Activity {
     }
     // Restored from the Nov 8 working capture flow: Android requires RECORD_AUDIO
     // permission in addition to the user's MediaProjection approval.
+    private void connectShizukuInjection() {
+        if (Build.VERSION.SDK_INT < 33) {
+            status.setText("Microphone injection requires Android 13 or newer.");
+            return;
+        }
+        try {
+            if (!Shizuku.pingBinder()) {
+                status.setText("Start Shizuku first, then connect again.");
+                return;
+            }
+            if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
+                Shizuku.requestPermission(REQ_SHIZUKU_INJECTION);
+                status.setText("Waiting for Shizuku permission.");
+                return;
+            }
+            bindInjectionService();
+        } catch (Throwable error) {
+            status.setText("Shizuku unavailable: " + error.getClass().getSimpleName());
+        }
+    }
+
+    private void onShizukuPermissionResult(int requestCode, int grantResult) {
+        if (requestCode != REQ_SHIZUKU_INJECTION) return;
+        if (grantResult == PackageManager.PERMISSION_GRANTED) bindInjectionService();
+        else status.setText("Shizuku permission was denied.");
+    }
+
+    private void bindInjectionService() {
+        if (injectionBinding) {
+            status.setText("Shizuku injection service is already connecting.");
+            return;
+        }
+        try {
+            Shizuku.bindUserService(injectionServiceArgs, injectionConnection);
+            injectionBinding = true;
+            status.setText("Starting privileged audio injection service…");
+        } catch (Throwable error) {
+            status.setText("Could not start Shizuku service: " + error.getClass().getSimpleName());
+        }
+    }
+
+    private void stopShizukuInjection() {
+        try {
+            Intent stop = new Intent(this, CaptureService.class).setAction("STOP_INJECTION");
+            startService(stop);
+            if (injectionService != null) injectionService.stopInjection();
+            if (injectionBinding) Shizuku.unbindUserService(injectionServiceArgs, injectionConnection, true);
+        } catch (Throwable ignored) {}
+        injectionService = null;
+        injectionBinding = false;
+        status.setText("Shizuku microphone injection stopped.");
+    }
+
     private void requestCapture(){
         if(Build.VERSION.SDK_INT<29){status.setText("Internal audio capture requires Android 10 or newer.");return;}
         if(Build.VERSION.SDK_INT>=23 && checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)!=android.content.pm.PackageManager.PERMISSION_GRANTED){
@@ -246,8 +344,37 @@ public class MainActivity extends Activity {
             }catch(Exception e){status.setText("Could not open selected audio: "+e.getMessage());}
         }else if(req==REQ_CAPTURE&&result==RESULT_OK&&data!=null){
             Intent i=new Intent(this,CaptureService.class).setAction("START").putExtra("code",result).putExtra("data",data);
-            if(Build.VERSION.SDK_INT>=26)startForegroundService(i);else startService(i);
-            status.setText("Internal audio capture started.");
+            ParcelFileDescriptor capturePipeWriter = null;
+            boolean injectionStarted = false;
+            if (injectionService != null) {
+                ParcelFileDescriptor[] pipe = null;
+                try {
+                    pipe = ParcelFileDescriptor.createPipe();
+                    String injectionResult = injectionService.startInjection(pipe[0]);
+                    try { pipe[0].close(); } catch (Exception ignored) {}
+                    if (injectionResult != null && injectionResult.startsWith("OK:")) {
+                        i.putExtra("inject_pipe", pipe[1]);
+                        capturePipeWriter = pipe[1];
+                        injectionStarted = true;
+                    } else {
+                        try { pipe[0].close(); } catch (Exception ignored) {}
+                        try { pipe[1].close(); } catch (Exception ignored) {}
+                        status.setText(injectionResult == null ? "Injection setup failed." : injectionResult);
+                    }
+                } catch (Throwable error) {
+                    if (pipe != null) {
+                        try { pipe[0].close(); } catch (Exception ignored) {}
+                        try { pipe[1].close(); } catch (Exception ignored) {}
+                    }
+                    status.setText("Injection unavailable: " + error.getClass().getSimpleName());
+                }
+            }
+            try {
+                if(Build.VERSION.SDK_INT>=26)startForegroundService(i);else startService(i);
+            } finally {
+                if (capturePipeWriter != null) try { capturePipeWriter.close(); } catch (Exception ignored) {}
+            }
+            status.setText(injectionStarted ? "Internal audio capture and microphone injection started." : "Internal audio capture started; microphone injection is not active.");
         }else if(req==REQ_CAPTURE)status.setText("Recording permission was cancelled.");
     }
     private File captureFile(){return new File(getFilesDir(),"capture.pcm");}
@@ -318,6 +445,9 @@ public class MainActivity extends Activity {
     }
     @Override protected void onDestroy(){
         try { unregisterReceiver(captureStatusReceiver); } catch (Exception ignored) {}
+        Shizuku.removeBinderReceivedListener(shizukuBinderReceived);
+        Shizuku.removeBinderDeadListener(shizukuBinderDead);
+        Shizuku.removeRequestPermissionResultListener(shizukuPermissionResult);
         stopPlayback();
         if(tts!=null){tts.stop();tts.shutdown();}
         super.onDestroy();
