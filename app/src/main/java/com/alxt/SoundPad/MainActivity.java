@@ -61,6 +61,7 @@ public class MainActivity extends Activity {
         }
         @Override public void onServiceDisconnected(ComponentName name) {
             injectionService = null;
+            injectionBinding = false;
             if (status != null) status.setText("Shizuku injection service disconnected.");
         }
     };
@@ -343,6 +344,7 @@ public class MainActivity extends Activity {
             }catch(Exception e){status.setText("Could not open selected audio: "+e.getMessage());}
         }else if(req==REQ_CAPTURE&&result==RESULT_OK&&data!=null){
             Intent i=new Intent(this,CaptureService.class).setAction("START").putExtra("code",result).putExtra("data",data);
+            boolean injectionStarted = false;
             if (injectionService != null) {
                 ParcelFileDescriptor[] pipe = null;
                 try {
@@ -351,6 +353,7 @@ public class MainActivity extends Activity {
                     try { pipe[0].close(); } catch (Exception ignored) {}
                     if (injectionResult != null && injectionResult.startsWith("OK:")) {
                         i.putExtra("inject_pipe", pipe[1]);
+                        injectionStarted = true;
                     } else {
                         try { pipe[0].close(); } catch (Exception ignored) {}
                         try { pipe[1].close(); } catch (Exception ignored) {}
@@ -365,7 +368,7 @@ public class MainActivity extends Activity {
                 }
             }
             if(Build.VERSION.SDK_INT>=26)startForegroundService(i);else startService(i);
-            status.setText("Internal audio capture started. Injection is active only if AudioPolicy registration succeeded.");
+            status.setText(injectionStarted ? "Internal audio capture and microphone injection started." : "Internal audio capture started; microphone injection is not active.");
         }else if(req==REQ_CAPTURE)status.setText("Recording permission was cancelled.");
     }
     private File captureFile(){return new File(getFilesDir(),"capture.pcm");}
