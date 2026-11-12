@@ -116,7 +116,7 @@ public final class AudioInjectionService extends IAudioInjectionService.Stub {
             Method register = manager.getClass().getDeclaredMethod("registerAudioPolicy", policy.getClass());
             register.setAccessible(true);
             int result = (Integer) register.invoke(manager, policy);
-            if (result != AudioManager.SUCCESS) {
+            if (result != 0) {
                 throw new IllegalStateException("registerAudioPolicy returned " + result);
             }
 
@@ -141,9 +141,9 @@ public final class AudioInjectionService extends IAudioInjectionService.Stub {
                     boolean found = false;
                     int activeUid = -1;
                     for (AudioRecordingConfiguration config : configs) {
-                        if (targetUids.contains(config.getClientUid())) {
+                        if (targetUids.contains(getClientUid(config))) {
                             found = true;
-                            activeUid = config.getClientUid();
+                            activeUid = getClientUid(config);
                             break;
                         }
                     }
@@ -156,10 +156,10 @@ public final class AudioInjectionService extends IAudioInjectionService.Stub {
             this.recordingCallback = callback;
             manager.registerAudioRecordingCallback(callback, new Handler(Looper.getMainLooper()));
             for (AudioRecordingConfiguration config : manager.getActiveRecordingConfigurations()) {
-                if (targetUids.contains(config.getClientUid())) {
+                if (targetUids.contains(getClientUid(config))) {
                     targetRecorderActive.set(true);
                     status = "Injector registered; PUBG microphone recorder detected (uid="
-                        + config.getClientUid() + ").";
+                        + getClientUid(config) + ").";
                     break;
                 }
             }
@@ -189,6 +189,18 @@ public final class AudioInjectionService extends IAudioInjectionService.Stub {
             status = "Injection setup failed: " + rootMessage(error);
             Log.e(TAG, status, error);
             return status;
+        }
+    }
+
+    // getClientUid() is hidden from the public Android SDK stubs.
+    private static int getClientUid(AudioRecordingConfiguration config) {
+        try {
+            Method method = AudioRecordingConfiguration.class.getDeclaredMethod("getClientUid");
+            method.setAccessible(true);
+            return (Integer) method.invoke(config);
+        } catch (Throwable error) {
+            Log.w(TAG, "Cannot read recording client UID on this Android build", error);
+            return -1;
         }
     }
 
