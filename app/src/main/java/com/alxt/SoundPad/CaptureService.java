@@ -75,7 +75,10 @@ public class CaptureService extends Service {
             recording = true;
             writerThread = new Thread(this::writeCapture, "SoundPad-capture-writer");
             writerThread.start();
+            reportStatus("Internal audio capture is active; waiting for eligible audio.");
         } catch (Exception e) {
+            reportStatus("Internal audio capture failed: " + e.getClass().getSimpleName()
+                + (e.getMessage() == null ? "" : ": " + e.getMessage()));
             stopCapture();
             stopSelf();
         }
@@ -85,6 +88,8 @@ public class CaptureService extends Service {
     private void writeCapture() {
         File out = new File(getFilesDir(), "capture.pcm");
         byte[] buffer = new byte[16384];
+        long totalBytes = 0;
+        boolean firstBufferReported = false;
         try (FileOutputStream stream = new FileOutputStream(out, false)) {
             while (recording) {
                 AudioRecord active;
@@ -92,6 +97,11 @@ public class CaptureService extends Service {
                 if (active == null) break;
                 int count = active.read(buffer, 0, buffer.length, AudioRecord.READ_BLOCKING);
                 if (count > 0) {
+                    totalBytes += count;
+                    if (!firstBufferReported) {
+                        firstBufferReported = true;
+                        reportStatus("Captured internal audio; forwarding " + count + " bytes to the Shizuku audio path.");
+                    }
                     stream.write(buffer, 0, count);
                     OutputStream pipe = injectionOutput;
                     if (pipe != null) {
@@ -108,10 +118,21 @@ public class CaptureService extends Service {
             }
             stream.flush();
         } catch (Exception e) {
-            // The partial recording remains playable if at least one buffer was written.
+            reportStatus("Audio capture stream error: " + e.getClass().getSimpleName()
+                + (e.getMessage() == null ? "" : ": " + e.getMessage()));
         } finally {
+            if (totalBytes == 0 && recording) {
+                reportStatus("Capture started, but Android supplied no eligible playback audio.");
+            }
             stopSelf();
         }
+    }
+
+    private void reportStatus(String message) {
+        Intent update = new Intent("com.alxt.SoundPad.CAPTURE_STATUS")
+            .setPackage(getPackageName())
+            .putExtra("message", message);
+        sendBroadcast(update);
     }
 
     private void createNotificationChannel() {
