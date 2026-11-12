@@ -1,692 +1,325 @@
 package com.alxt.SoundPad;
 
-import android.Manifest;
 import android.app.Activity;
-import android.content.Context;
+import android.app.AlertDialog;
 import android.content.Intent;
-import android.content.pm.PackageManager;
-import android.media.AudioAttributes;
-import android.media.AudioFormat;
-import android.media.AudioTrack;
-import android.media.AudioRecord;
-import android.media.MediaRecorder;
-import android.net.Uri;
+import android.content.SharedPreferences;
+import android.media.*;
 import android.media.projection.MediaProjectionManager;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.speech.tts.TextToSpeech;
-import android.speech.tts.UtteranceProgressListener;
-import android.view.View;
+import android.provider.MediaStore;
+import android.view.Gravity;
 import android.widget.*;
 import java.io.*;
-import java.util.Arrays;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.util.ArrayList;
 import java.util.Locale;
 
 public class MainActivity extends Activity {
-    private static final int REQ_CAPTURE = 8;
-    private static final int REQ_RECORD_AUDIO = 9;
-    private static final int REQ_SCREEN_CAPTURE = 10;
-    private static final int REQ_AUDIO_FILE = 11;
-    private static final int REQ_MIC_TEST = 12;
-    private int pendingMicDeviceId = 0;
-    private Uri selectedAudioUri;
-    private static final int SAMPLE_RATE = 44100;
-
-    private TextToSpeech tts;
-    private EditText words;
-    private TextView status;
-    private Spinner fpsSpinner;
-    private CheckBox hudToggle;
-    private float savedPitch = 1.0f;
-    private float savedHz = 150.0f;
-    private boolean ttsReady = false;
-    private volatile boolean playbackRunning = false;
-    private volatile AudioTrack playbackTrack;
+    private static final int REQ_CAPTURE = 10, REQ_AUDIO_FILE = 11, REQ_RECORD_AUDIO = 12, RATE = 44100;
+    private static final String PREFS = "soundpad_audio_settings";
+    private static final String PREF_MONITOR = "monitor_enabled";
+    private static final String PREF_OUTPUT = "output_device_id";
+    private static final String PREF_TTS_RATE = "tts_rate";
+    private static final String PREF_TTS_PITCH = "tts_pitch";
+    private android.speech.tts.TextToSpeech tts;
+    private EditText words, link;
+    private TextView status, routeStatus;
+    private Switch monitorSwitch;
+    private SeekBar rateSeek, pitchSeek;
+    private volatile AudioTrack playback;
+    private volatile boolean playbackRunning;
     private Thread playbackThread;
-    private volatile boolean micMonitorRunning = false;
-    private volatile AudioRecord micMonitorRecorder;
-    private volatile AudioTrack micMonitorTrack;
-    private Thread micMonitorThread;
+    private SharedPreferences prefs;
+    private AudioManager audioManager;
+    private final android.content.BroadcastReceiver captureStatusReceiver = new android.content.BroadcastReceiver() {
+        @Override public void onReceive(android.content.Context context, Intent intent) {
+            String message = intent.getStringExtra("message");
+            if (message != null && status != null) status.setText(message);
+        }
+    };
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
-        savedPitch = getPreferences(0).getFloat("voice_pitch", 1.0f);
-        savedHz = getPreferences(0).getFloat("voice_hz", 150.0f);
-
+        prefs=getSharedPreferences(PREFS,MODE_PRIVATE);
+        audioManager=(AudioManager)getSystemService(AUDIO_SERVICE);
+        android.content.IntentFilter captureFilter = new android.content.IntentFilter("com.alxt.SoundPad.CAPTURE_STATUS");
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(captureStatusReceiver, captureFilter, android.content.Context.RECEIVER_NOT_EXPORTED);
+        else registerReceiver(captureStatusReceiver, captureFilter);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(22, 22, 22, 22);
-        ScrollView scroll = new ScrollView(this);
-        scroll.addView(root);
+        root.setPadding(24,22,24,22);
+        ScrollView scroll = new ScrollView(this); scroll.addView(root);
+        TextView title = new TextView(this); title.setText("SoundPad 3.7"); title.setTextSize(28); root.addView(title);
+        status = new TextView(this); status.setText("Ready"); root.addView(status);
 
-        TextView heading = new TextView(this);
-        heading.setText("SoundPad — Voice Studio");
-        heading.setTextSize(24);
-        root.addView(heading);
+        section(root,"Text to speech");
+        words = new EditText(this); words.setHint("Type text here…"); words.setMinLines(3); words.setGravity(Gravity.TOP); root.addView(words);
+        button(root,"SPEAK TEXT",v -> {
+            String s=words.getText().toString().trim();
+            if(s.isEmpty()){status.setText("Type something to speak.");return;}
+            if(tts==null){status.setText("TTS engine is still starting. Try again in a moment.");return;}
+            applyTtsSettings();
+            tts.speak(s,android.speech.tts.TextToSpeech.QUEUE_FLUSH,null,"soundpad");
+        });
+        button(root,"STOP SPEAKING",v -> { if(tts!=null) tts.stop(); });
+        TextView rateLabel=new TextView(this); rateLabel.setText("Speech speed"); root.addView(rateLabel);
+        rateSeek=new SeekBar(this); rateSeek.setMax(35); rateSeek.setProgress(Math.max(0,Math.min(35,(settingValue(PREF_TTS_RATE)-25)/5))); root.addView(rateSeek);
+        TextView pitchLabel=new TextView(this); pitchLabel.setText("Voice pitch"); root.addView(pitchLabel);
+        pitchSeek=new SeekBar(this); pitchSeek.setMax(35); pitchSeek.setProgress(Math.max(0,Math.min(35,(settingValue(PREF_TTS_PITCH)-25)/5))); root.addView(pitchSeek);
+        rateSeek.setOnSeekBarChangeListener(ttsSettingListener(PREF_TTS_RATE));
+        pitchSeek.setOnSeekBarChangeListener(ttsSettingListener(PREF_TTS_PITCH));
+        section(root,"Internal audio recording");
+        button(root,"START INTERNAL AUDIO RECORDING",v -> requestCapture());
+        button(root,"STOP INTERNAL AUDIO RECORDING",v -> { startService(new Intent(this,CaptureService.class).setAction("STOP")); status.setText("Stopping recording and closing the audio file…"); });
+        button(root,"PLAY INTERNAL AUDIO RECORDING",v -> playRecording());
+        button(root,"STOP RECORDING PLAYBACK",v -> stopPlayback());
+        button(root,"SAVE RECORDING TO DOWNLOADS",v -> saveRecording());
+        TextView captureInfo=new TextView(this); captureInfo.setText("Android screen-capture permission is required. Only apps that allow playback capture can be recorded."); root.addView(captureInfo);
 
-        status = new TextView(this);
-        status.setText("Ready. Internal playback capture requires Android 10+ and the source app must allow capture.");
-        root.addView(status);
+        section(root,"Open audio link");
+        link=new EditText(this); link.setHint("Paste a YouTube, SoundCloud or direct audio link"); link.setSingleLine(true); root.addView(link);
+        button(root,"OPEN LINK",v -> openLink());
+        TextView linkInfo=new TextView(this); linkInfo.setText("Links open in the installed app or browser. SoundPad does not extract or download streams from YouTube or SoundCloud."); root.addView(linkInfo);
 
-        TextView bridgeTitle = new TextView(this);
-        bridgeTitle.setText("\\nMicrophone & Audio Routing");
-        bridgeTitle.setTextSize(20);
-        root.addView(bridgeTitle);
-        TextView routeHint = new TextView(this);
-        routeHint.setText("Choose where SoundPad plays audio. Available routes depend on your phone and connected devices:");
-        root.addView(routeHint);
-        TextView outputLabel = new TextView(this);
-        outputLabel.setText("PLAYBACK OUTPUT (speaker / headset / Bluetooth / USB)");
-        root.addView(outputLabel);
-        Spinner outputSpinner = new Spinner(this);
-        root.addView(outputSpinner);
-        java.util.ArrayList<android.media.AudioDeviceInfo> outputDevices = new java.util.ArrayList<>();
-        java.util.ArrayList<String> outputLabels = new java.util.ArrayList<>();
-        outputLabels.add("System default output");
-        if (Build.VERSION.SDK_INT >= 23) {
-            android.media.AudioManager am = (android.media.AudioManager)getSystemService(AUDIO_SERVICE);
-            for (android.media.AudioDeviceInfo device : am.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS)) {
-                outputDevices.add(device);
-                outputLabels.add(audioDeviceLabel(device));
-            }
-        }
-        outputSpinner.setAdapter(new ArrayAdapter<String>(this, android.R.layout.simple_spinner_dropdown_item, outputLabels));
-
-        TextView inputLabel = new TextView(this);
-        inputLabel.setText("MICROPHONE INPUT (recording source — not a playback output)");
-        root.addView(inputLabel);
-        Spinner inputSpinner = new Spinner(this);
-        root.addView(inputSpinner);
-        java.util.ArrayList<android.media.AudioDeviceInfo> inputDevices = new java.util.ArrayList<>();
-        java.util.ArrayList<String> inputLabels = new java.util.ArrayList<>();
-        inputLabels.add("Android default microphone");
-        refreshInputDevices(inputDevices, inputLabels);
-        inputSpinner.setAdapter(new ArrayAdapter<String>(this, android.R.layout.simple_spinner_dropdown_item, inputLabels));
-
-        addButton(root, "REFRESH ALL AUDIO DEVICES", v -> {
-            outputDevices.clear();
-            outputLabels.clear();
-            outputLabels.add("System default output");
-            if (Build.VERSION.SDK_INT >= 23) {
-                android.media.AudioManager am = (android.media.AudioManager)getSystemService(AUDIO_SERVICE);
-                for (android.media.AudioDeviceInfo device : am.getDevices(android.media.AudioManager.GET_DEVICES_OUTPUTS)) {
-                    outputDevices.add(device);
-                    outputLabels.add(audioDeviceLabel(device));
-                }
-            }
-            outputSpinner.setAdapter(new ArrayAdapter<String>(this, android.R.layout.simple_spinner_dropdown_item, outputLabels));
-            inputDevices.clear();
-            inputLabels.clear();
-            inputLabels.add("Android default microphone");
-            refreshInputDevices(inputDevices, inputLabels);
-            inputSpinner.setAdapter(new ArrayAdapter<String>(this, android.R.layout.simple_spinner_dropdown_item, inputLabels));
-            status.setText("Audio devices refreshed. Connect your headset or Bluetooth/USB device first.");
-        });
-        addButton(root, "APPLY PLAYBACK OUTPUT", v -> {
-            int position = outputSpinner.getSelectedItemPosition();
-            int deviceId = position <= 0 || position - 1 >= outputDevices.size() ? 0 : outputDevices.get(position - 1).getId();
-            Intent route = new Intent(this, AudioBridgeService.class).setAction(AudioBridgeService.SET_OUTPUT_DEVICE)
-                .putExtra(AudioBridgeService.EXTRA_OUTPUT_DEVICE_ID, deviceId);
-            startService(route);
-            status.setText(deviceId == 0 ? "Playback output set to Android system default." : "Playback output requested: " + outputLabels.get(position));
-        });
-        addButton(root, "TEST SELECTED MICROPHONE INPUT", v -> {
-            int position = inputSpinner.getSelectedItemPosition();
-            pendingMicDeviceId = position <= 0 || position - 1 >= inputDevices.size() ? 0 : inputDevices.get(position - 1).getId();
-            if (Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQ_MIC_TEST);
-            } else {
-                testMicrophoneInput(pendingMicDeviceId);
-            }
-        });
-        addButton(root, "START MIC INPUT → SYSTEM DEFAULT SPEAKER MONITOR", v -> {
-            int position = inputSpinner.getSelectedItemPosition();
-            int deviceId = position <= 0 || position - 1 >= inputDevices.size() ? 0 : inputDevices.get(position - 1).getId();
-            if (Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-                pendingMicDeviceId = deviceId;
-                requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQ_MIC_TEST);
-                status.setText("Grant microphone permission, then press the monitor button again.");
-            } else {
-                startMicMonitor(deviceId);
-            }
-        });
-        addButton(root, "STOP MIC MONITOR", v -> stopMicMonitor());
-        addButton(root, "USE ANDROID COMMUNICATION AUDIO MODE", v -> {
-            startService(new Intent(this, AudioBridgeService.class).setAction(AudioBridgeService.ROUTE_CALL_AUDIO));
-            status.setText("Communication-audio routing requested. Android decides the available route; no virtual mic is created.");
-        });
-        addButton(root, "CHOOSE AUDIO FILE", v -> {
-            Intent picker = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-            picker.addCategory(Intent.CATEGORY_OPENABLE);
-            picker.setType("audio/*");
-            picker.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-            startActivityForResult(picker, REQ_AUDIO_FILE);
-        });
-        addButton(root, "▶ PLAY FILE THROUGH SELECTED OUTPUT", v -> {
-            if (selectedAudioUri == null) { status.setText("Choose an audio file first."); return; }
-            int position = outputSpinner.getSelectedItemPosition();
-            int deviceId = position <= 0 || position - 1 >= outputDevices.size() ? 0 : outputDevices.get(position - 1).getId();
-            Intent play = new Intent(this, AudioBridgeService.class).setAction(AudioBridgeService.PLAY).setData(selectedAudioUri)
-                .putExtra(AudioBridgeService.EXTRA_OUTPUT_DEVICE_ID, deviceId);
-            if (Build.VERSION.SDK_INT >= 26) startForegroundService(play); else startService(play);
-            status.setText("Starting selected audio file on " + (deviceId == 0 ? "system default output" : outputLabels.get(position)) + ".");
-        });
-        addButton(root, "PAUSE PLAYBACK", v -> startService(new Intent(this, AudioBridgeService.class).setAction(AudioBridgeService.PAUSE)));
-        addButton(root, "RESUME PLAYBACK", v -> startService(new Intent(this, AudioBridgeService.class).setAction(AudioBridgeService.RESUME)));
-        addButton(root, "STOP PLAYBACK / RESET ROUTING", v -> startService(new Intent(this, AudioBridgeService.class).setAction(AudioBridgeService.STOP)));
-        addButton(root, "OPEN ANDROID SOUND SETTINGS", v -> {
-            try { startActivity(new Intent("android.settings.SOUND_SETTINGS")); }
-            catch (Exception e) { status.setText("Open Android Settings to manage connected audio devices."); }
-        });
-        TextView bridgeNote = new TextView(this);
-        bridgeNote.setText("Important: Android exposes playback outputs (speaker, wired headset, Bluetooth and USB when connected) separately from microphone inputs. An ordinary no-root app cannot select a microphone as a speaker output or create a virtual mic that another game/app can use. This screen routes SoundPad playback to a supported output; for mic loopback you still need compatible physical audio hardware or an Android/device feature that explicitly supports it. The communication mode is only a routing request.");
-        root.addView(bridgeNote);
-
-        TextView screenTitle = new TextView(this);
-        screenTitle.setText("\\nScreen recording");
-        screenTitle.setTextSize(20);
-        root.addView(screenTitle);
-        TextView fpsLabel = new TextView(this);
-        fpsLabel.setText("Recording frame-rate target:");
-        root.addView(fpsLabel);
-        fpsSpinner = new Spinner(this);
-        fpsSpinner.setAdapter(new ArrayAdapter<String>(this, android.R.layout.simple_spinner_dropdown_item,
-            new String[]{"60 FPS", "120 FPS"}));
-        root.addView(fpsSpinner);
-        hudToggle = new CheckBox(this);
-        hudToggle.setText("Show small recording status overlay while recording");
-        hudToggle.setChecked(false);
-        root.addView(hudToggle);
-        addButton(root, "Start screen recording", v -> requestScreenRecording());
-        addButton(root, "Stop screen recording", v -> {
-            startService(new Intent(this, ScreenRecordService.class).setAction("STOP"));
-            status.setText("Stopping screen recording…");
-        });
-        TextView screenNote = new TextView(this);
-        screenNote.setText("Screen recordings are saved as MP4 in SoundPad's Movies folder. 120 FPS is a requested target; Android and the phone's encoder may limit the actual frame rate. The optional overlay is only a recording-status indicator, not an aim-assist.");
-        root.addView(screenNote);
-
-        addButton(root, "Start internal audio recording", v -> requestCapturePermission());
-        addButton(root, "Stop recording", v -> {
-            startService(new Intent(this, CaptureService.class).setAction("STOP"));
-            status.setText("Stopping recording and saving the audio…");
-        });
-        addButton(root, "▶ Play recorded internal audio", v -> playRecording());
-        addButton(root, "Stop playback", v -> stopPlayback());
-        addButton(root, "Analyze recording & save voice pitch profile", v -> analyzeAndSaveProfile());
-        addButton(root, "Use saved voice pitch profile", v -> applySavedProfile());
-        addButton(root, "Use natural Google-style TTS", v -> applyNaturalGoogleStyle());
-        addButton(root, "Open Android TTS engine & voice settings", v -> openTtsSettings());
-        addButton(root, "Apply warm older-male voice style", v -> applyOlderMaleStyle());
-
-        TextView hint = new TextView(this);
-        hint.setText("Text to speak:");
-        root.addView(hint);
-        words = new EditText(this);
-        words.setHint("Type your text here…");
-        words.setMinLines(3);
-        words.setGravity(48);
-        root.addView(words);
-
-        addButton(root, "Speak text (natural voice)", v -> speakText());
-        addButton(root, "Stop speech", v -> { if (tts != null) tts.stop(); });
-
-        TextView note = new TextView(this);
-        note.setText("\nThe recording playback button lets you hear the captured audio. The saved profile changes the Android TTS pitch approximately; it does not clone the speaker's timbre or identity. Some TTS engines ignore pitch requests or have limited pitch ranges. Capture works only when Android and the source app permit playback capture.");
-        root.addView(note);
         setContentView(scroll);
-
-        tts = new TextToSpeech(this, result -> {
-            if (result == TextToSpeech.SUCCESS) {
-                int lang = tts.setLanguage(Locale.getDefault());
-                if (lang == TextToSpeech.LANG_MISSING_DATA || lang == TextToSpeech.LANG_NOT_SUPPORTED) {
-                    lang = tts.setLanguage(Locale.US);
-                }
-                ttsReady = lang != TextToSpeech.LANG_MISSING_DATA && lang != TextToSpeech.LANG_NOT_SUPPORTED;
-                if (ttsReady) {
-                    boolean applied = applyPitchToEngine();
-                    status.setText("TTS ready. Saved pitch: " + String.format(Locale.US, "%.0f Hz / %.2fx", savedHz, savedPitch)
-                        + (applied ? " (applied)" : " (engine rejected pitch setting)"));
-                } else status.setText("No supported TTS language is installed. Install or enable a device TTS voice.");
-            } else status.setText("TTS initialization failed. Check Android Text-to-speech settings.");
-        });
+        initTts();
     }
 
-    private void refreshInputDevices(java.util.ArrayList<android.media.AudioDeviceInfo> devices, java.util.ArrayList<String> labels) {
-        if (Build.VERSION.SDK_INT >= 23) {
-            android.media.AudioManager am = (android.media.AudioManager)getSystemService(AUDIO_SERVICE);
-            if (am != null) for (android.media.AudioDeviceInfo device : am.getDevices(android.media.AudioManager.GET_DEVICES_INPUTS)) {
-                devices.add(device);
-                labels.add(audioInputDeviceLabel(device));
-            }
+    private android.widget.SeekBar.OnSeekBarChangeListener ttsSettingListener(String key){
+        return new android.widget.SeekBar.OnSeekBarChangeListener(){
+            public void onProgressChanged(SeekBar bar,int progress,boolean fromUser){if(fromUser){prefs.edit().putInt(key,25+progress*5).apply();applyTtsSettings(); AudioTrack active=playback; if(active!=null && key.equals(PREF_TTS_PITCH)){try{active.setPlaybackRate(Math.max(8000,Math.min(192000,(int)(RATE*(25+progress*5)/100.0f))));}catch(Exception ignored){}}}}
+            public void onStartTrackingTouch(SeekBar bar){}
+            public void onStopTrackingTouch(SeekBar bar){}
+        };
+    }
+
+    private int settingValue(String key){
+        int value=prefs.getInt(key,100);
+        // Migrate SoundPad 3.7's 0.5x–2.0x values (stored as 5–20 tenths)
+        // into the expanded 0.25x–2.0x percentage scale.
+        if(value>0 && value<=20){value*=10;prefs.edit().putInt(key,value).apply();}
+        return Math.max(25,Math.min(200,value));
+    }
+
+    private void applyTtsSettings(){
+        if(tts==null)return;
+        float rate=settingValue(PREF_TTS_RATE)/100.0f;
+        float pitch=settingValue(PREF_TTS_PITCH)/100.0f;
+        tts.setSpeechRate(rate);tts.setPitch(pitch);
+    }
+
+    private void initTts(){
+        if(tts!=null){try{tts.stop();tts.shutdown();}catch(Exception ignored){}}
+        tts=new android.speech.tts.TextToSpeech(this,result->runOnUiThread(()->{
+            if(result==android.speech.tts.TextToSpeech.SUCCESS){
+                int lang=tts.setLanguage(Locale.getDefault());
+                if(lang==android.speech.tts.TextToSpeech.LANG_MISSING_DATA||lang==android.speech.tts.TextToSpeech.LANG_NOT_SUPPORTED)tts.setLanguage(Locale.US);
+                applyTtsSettings();
+                status.setText("Android text-to-speech ready.");
+            }else status.setText("Text-to-speech could not initialize.");
+        }));
+    }
+
+    private void updateRouteStatus(){
+        if(routeStatus==null)return;
+        int id=prefs.getInt(PREF_OUTPUT,0);
+        if(id==0){routeStatus.setText("Output: Android system default");return;}
+        AudioDeviceInfo d=findOutput(id);
+        routeStatus.setText(d==null?"Output: saved device unavailable (system default will be used)":"Output: "+deviceName(d));
+    }
+    private AudioDeviceInfo findOutput(int id){
+        if(audioManager==null)return null;
+        for(AudioDeviceInfo d:audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS))if(d.getId()==id)return d;
+        return null;
+    }
+    private String deviceName(AudioDeviceInfo d){
+        String name=d.getProductName()==null?"":d.getProductName().toString();
+        if(name.trim().isEmpty())name=deviceType(d.getType());
+        return name+" (ID "+d.getId()+")";
+    }
+    private String deviceType(int type){
+        switch(type){
+            case AudioDeviceInfo.TYPE_BUILTIN_SPEAKER:return "Phone speaker";
+            case AudioDeviceInfo.TYPE_BUILTIN_EARPIECE:return "Phone earpiece";
+            case AudioDeviceInfo.TYPE_WIRED_HEADPHONES:return "Wired headphones";
+            case AudioDeviceInfo.TYPE_WIRED_HEADSET:return "Wired headset";
+            case AudioDeviceInfo.TYPE_BLUETOOTH_A2DP:return "Bluetooth audio";
+            case AudioDeviceInfo.TYPE_BLE_HEADSET:return "Bluetooth LE headset";
+            case AudioDeviceInfo.TYPE_USB_DEVICE:return "USB audio";
+            case AudioDeviceInfo.TYPE_USB_HEADSET:return "USB headset";
+            case AudioDeviceInfo.TYPE_HDMI:return "HDMI audio";
+            default:return "Audio output";
         }
     }
-
-    private String audioInputDeviceLabel(android.media.AudioDeviceInfo device) {
-        String type;
-        switch (device.getType()) {
-            case android.media.AudioDeviceInfo.TYPE_BUILTIN_MIC: type = "Built-in microphone"; break;
-            case android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET: type = "Wired headset microphone"; break;
-            case android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO: type = "Bluetooth call microphone"; break;
-            case android.media.AudioDeviceInfo.TYPE_USB_DEVICE:
-            case android.media.AudioDeviceInfo.TYPE_USB_HEADSET: type = "USB microphone"; break;
-            default: type = "Microphone input (type " + device.getType() + ")"; break;
+    private ArrayList<AudioDeviceInfo> outputDevices(){
+        ArrayList<AudioDeviceInfo> list=new ArrayList<>();
+        if(audioManager!=null)for(AudioDeviceInfo d:audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS))list.add(d);
+        return list;
+    }
+    private void chooseOutputDevice(){
+        ArrayList<AudioDeviceInfo> devices=outputDevices();
+        ArrayList<String> labels=new ArrayList<>();labels.add("System default");
+        for(AudioDeviceInfo d:devices)labels.add(deviceName(d));
+        new AlertDialog.Builder(this).setTitle("Choose audio output").setItems(labels.toArray(new String[0]),(dialog,which)->{
+            int id=which==0?0:devices.get(which-1).getId();
+            prefs.edit().putInt(PREF_OUTPUT,id).apply();
+            applyOutputRoute(id);
+            status.setText("Output route updated.");updateRouteStatus();
+        }).setNegativeButton("Cancel",null).show();
+    }
+    private void cycleOutputDevice(){
+        ArrayList<AudioDeviceInfo> devices=outputDevices();
+        if(devices.isEmpty()){status.setText("No selectable output devices were reported by Android.");return;}
+        int current=prefs.getInt(PREF_OUTPUT,0),next=0;
+        if(current==0)next=devices.get(0).getId();
+        else{
+            int index=-1;for(int i=0;i<devices.size();i++)if(devices.get(i).getId()==current)index=i;
+            next=index<0||index+1>=devices.size()?0:devices.get(index+1).getId();
         }
-        CharSequence name = device.getProductName();
-        return type + (name == null || name.length() == 0 ? "" : " — " + name);
+        prefs.edit().putInt(PREF_OUTPUT,next).apply();
+        applyOutputRoute(next);
+        updateRouteStatus();status.setText("Output route switched.");
     }
-
-    private void startMicMonitor(final int deviceId) {
-        stopMicMonitor();
-        micMonitorRunning = true;
-        micMonitorThread = new Thread(() -> {
-            AudioRecord recorder = null;
-            AudioTrack track = null;
-            try {
-                int inputMin = AudioRecord.getMinBufferSize(SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
-                int outputMin = AudioTrack.getMinBufferSize(SAMPLE_RATE, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT);
-                if (inputMin <= 0 || outputMin <= 0) throw new IllegalStateException("This device does not support the required audio format.");
-                recorder = new AudioRecord.Builder()
-                    .setAudioSource(MediaRecorder.AudioSource.DEFAULT)
-                    .setAudioFormat(new AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                        .setSampleRate(SAMPLE_RATE).setChannelMask(AudioFormat.CHANNEL_IN_MONO).build())
-                    .setBufferSizeInBytes(Math.max(inputMin, 8192)).build();
-                if (recorder.getState() != AudioRecord.STATE_INITIALIZED) throw new IllegalStateException("Could not initialize microphone.");
-                if (Build.VERSION.SDK_INT >= 23 && deviceId != 0) {
-                    android.media.AudioManager am = (android.media.AudioManager)getSystemService(AUDIO_SERVICE);
-                    boolean found = false;
-                    if (am != null) for (android.media.AudioDeviceInfo d : am.getDevices(android.media.AudioManager.GET_DEVICES_INPUTS)) {
-                        if (d.getId() == deviceId) { found = recorder.setPreferredDevice(d); break; }
-                    }
-                    if (!found) throw new IllegalStateException("Selected microphone is unavailable or rejected.");
-                }
-                track = new AudioTrack.Builder()
-                    .setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
-                    .setAudioFormat(new AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                        .setSampleRate(SAMPLE_RATE).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
-                    .setBufferSizeInBytes(Math.max(outputMin, 8192)).setTransferMode(AudioTrack.MODE_STREAM).build();
-                micMonitorRecorder = recorder;
-                micMonitorTrack = track;
-                recorder.startRecording();
-                track.play();
-                short[] samples = new short[1024];
-                runOnUiThread(() -> status.setText("Live microphone monitor active → Android system-default speaker output. Use headphones to reduce feedback."));
-                while (micMonitorRunning) {
-                    int n = recorder.read(samples, 0, samples.length);
-                    if (n < 0) throw new IllegalStateException("Microphone read failed: " + n);
-                    if (n > 0) {
-                        int offset = 0;
-                        while (micMonitorRunning && offset < n) {
-                            int wrote = track.write(samples, offset, n - offset);
-                            if (wrote < 0) throw new IllegalStateException("Speaker playback failed: " + wrote);
-                            offset += wrote;
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                runOnUiThread(() -> status.setText("Mic monitor stopped: " + e.getMessage()));
-            } finally {
-                micMonitorRunning = false;
-                micMonitorRecorder = null;
-                micMonitorTrack = null;
-                if (recorder != null) { try { recorder.stop(); } catch (Exception ignored) {} recorder.release(); }
-                if (track != null) { try { track.stop(); } catch (Exception ignored) {} track.release(); }
-            }
-        }, "SoundPad-mic-monitor");
-        micMonitorThread.start();
+    private void applyOutputRoute(int id){
+        sendCaptureSetting("SET_OUTPUT_DEVICE","output_device_id",id);
+        Intent bridge=new Intent(this,AudioBridgeService.class).setAction(AudioBridgeService.SET_OUTPUT_DEVICE).putExtra(AudioBridgeService.EXTRA_OUTPUT_DEVICE_ID,id);
+        try{startService(bridge);}catch(Exception ignored){}
     }
-
-    private void stopMicMonitor() {
-        micMonitorRunning = false;
-        AudioRecord recorder = micMonitorRecorder;
-        AudioTrack track = micMonitorTrack;
-        if (recorder != null) { try { recorder.stop(); } catch (Exception ignored) {} }
-        if (track != null) { try { track.pause(); track.flush(); } catch (Exception ignored) {} }
-        status.setText("Microphone monitor stopped.");
+    private void sendCaptureSetting(String action,String key,boolean value){
+        Intent i=new Intent(this,CaptureService.class).setAction(action).putExtra(key,value);
+        try{startService(i);}catch(Exception ignored){}
     }
-
-    private void testMicrophoneInput(final int deviceId) {
-        status.setText("Testing microphone input for up to 3 seconds…");
-        new Thread(() -> {
-            AudioRecord recorder = null;
-            try {
-                int min = AudioRecord.getMinBufferSize(44100, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
-                if (min <= 0) throw new IllegalStateException("This device does not support the requested microphone format.");
-                recorder = new AudioRecord.Builder()
-                    .setAudioSource(MediaRecorder.AudioSource.DEFAULT)
-                    .setAudioFormat(new AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                        .setSampleRate(44100).setChannelMask(AudioFormat.CHANNEL_IN_MONO).build())
-                    .setBufferSizeInBytes(Math.max(min, 8192)).build();
-                if (recorder.getState() != AudioRecord.STATE_INITIALIZED) throw new IllegalStateException("Microphone could not be initialized.");
-                if (Build.VERSION.SDK_INT >= 23 && deviceId != 0) {
-                    android.media.AudioManager am = (android.media.AudioManager)getSystemService(AUDIO_SERVICE);
-                    boolean found = false;
-                    if (am != null) for (android.media.AudioDeviceInfo d : am.getDevices(android.media.AudioManager.GET_DEVICES_INPUTS)) {
-                        if (d.getId() == deviceId) { found = recorder.setPreferredDevice(d); break; }
-                    }
-                    if (!found) throw new IllegalStateException("Selected microphone is unavailable or Android rejected it.");
-                }
-                recorder.startRecording();
-                short[] samples = new short[2048];
-                long end = android.os.SystemClock.elapsedRealtime() + 3000;
-                long total = 0;
-                int reads = 0;
-                while (android.os.SystemClock.elapsedRealtime() < end) {
-                    int n = recorder.read(samples, 0, samples.length);
-                    if (n < 0) throw new IllegalStateException("Microphone read failed: " + n);
-                    for (int i = 0; i < n; i++) total += (long)samples[i] * samples[i];
-                    reads += n;
-                }
-                final double rms = reads == 0 ? 0 : Math.sqrt((double)total / reads);
-                runOnUiThread(() -> status.setText(String.format(Locale.US, "Microphone test finished. Input RMS level: %.0f / 32768. This tests recording input only; it does not route playback into another app's mic.", rms)));
-            } catch (Exception e) {
-                runOnUiThread(() -> status.setText("Microphone test failed: " + e.getMessage()));
-            } finally {
-                if (recorder != null) { try { recorder.stop(); } catch (Exception ignored) {} recorder.release(); }
-            }
-        }, "SoundPad-mic-test").start();
+    private void sendCaptureSetting(String action,String key,int value){
+        Intent i=new Intent(this,CaptureService.class).setAction(action).putExtra(key,value);
+        try{startService(i);}catch(Exception ignored){}
     }
-
-    private String audioDeviceLabel(android.media.AudioDeviceInfo device) {
-        String type;
-        switch (device.getType()) {
-            case android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER: type = "Phone speaker"; break;
-            case android.media.AudioDeviceInfo.TYPE_BUILTIN_EARPIECE: type = "Phone earpiece"; break;
-            case android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES: type = "Wired headphones"; break;
-            case android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET: type = "Wired headset"; break;
-            case android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP: type = "Bluetooth audio"; break;
-            case android.media.AudioDeviceInfo.TYPE_BLUETOOTH_SCO: type = "Bluetooth call audio"; break;
-            case android.media.AudioDeviceInfo.TYPE_USB_DEVICE:
-            case android.media.AudioDeviceInfo.TYPE_USB_HEADSET: type = "USB audio"; break;
-            case android.media.AudioDeviceInfo.TYPE_HDMI: type = "HDMI audio"; break;
-            default: type = "Audio output (type " + device.getType() + ")"; break;
-        }
-        CharSequence name = device.getProductName();
-        return type + (name == null || name.length() == 0 ? "" : " — " + name);
+    private void pickAudioFile(){
+        Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType("audio/*");
+        startActivityForResult(i,REQ_AUDIO_FILE);
     }
-
-    private void addButton(LinearLayout parent, String label, View.OnClickListener click) {
-        Button b = new Button(this);
-        b.setText(label);
-        b.setOnClickListener(click);
-        parent.addView(b);
+    private void section(LinearLayout root,String value){TextView t=new TextView(this);t.setText("\n"+value);t.setTextSize(21);t.setPadding(0,18,0,8);root.addView(t);}
+    private void button(LinearLayout root,String label,android.view.View.OnClickListener click){Button b=new Button(this);b.setText(label);root.addView(b,new LinearLayout.LayoutParams(-1,-2));b.setOnClickListener(click);}
+    private void openLink(){
+        String s=link.getText().toString().trim();if(s.isEmpty()){status.setText("Paste a link first.");return;}
+        Uri u=Uri.parse(s);String scheme=u.getScheme();
+        if(!"http".equalsIgnoreCase(scheme)&&!"https".equalsIgnoreCase(scheme)){status.setText("Use a full http or https link.");return;}
+        try{startActivity(new Intent(Intent.ACTION_VIEW,u));status.setText("Opened link in its app or browser.");}
+        catch(Exception e){status.setText("No app can open this link.");}
     }
-
-    private File recordingFile() { return new File(getFilesDir(), "capture.pcm"); }
-
-    private void requestScreenRecording() {
-        if (hudToggle != null && hudToggle.isChecked() && Build.VERSION.SDK_INT >= 23
-                && !android.provider.Settings.canDrawOverlays(this)) {
-            status.setText("Allow SoundPad to display the optional recording-status overlay, then return and tap Start screen recording again.");
-            Intent settings = new Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                android.net.Uri.parse("package:" + getPackageName()));
-            startActivity(settings);
-            return;
-        }
-        MediaProjectionManager manager = (MediaProjectionManager)getSystemService(Context.MEDIA_PROJECTION_SERVICE);
-        if (manager == null) { status.setText("Screen recording is not supported on this device."); return; }
-        startActivityForResult(manager.createScreenCaptureIntent(), REQ_SCREEN_CAPTURE);
-    }
-
-    private void requestCapturePermission() {
-        if (Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, REQ_RECORD_AUDIO);
+    // Restored from the Nov 8 working capture flow: Android requires RECORD_AUDIO
+    // permission in addition to the user's MediaProjection approval.
+    private void requestCapture(){
+        if(Build.VERSION.SDK_INT<29){status.setText("Internal audio capture requires Android 10 or newer.");return;}
+        if(Build.VERSION.SDK_INT>=23 && checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)!=android.content.pm.PackageManager.PERMISSION_GRANTED){
+            requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO},REQ_RECORD_AUDIO);
             return;
         }
         launchCaptureConsent();
     }
-
-    private void launchCaptureConsent() {
-        MediaProjectionManager manager = (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
-        if (manager == null) {
-            status.setText("This Android device does not provide screen/audio capture.");
-            return;
-        }
-        startActivityForResult(manager.createScreenCaptureIntent(), REQ_CAPTURE);
+    private void launchCaptureConsent(){
+        MediaProjectionManager m=(MediaProjectionManager)getSystemService(MEDIA_PROJECTION_SERVICE);
+        if(m==null){status.setText("This Android device does not provide screen/audio capture.");return;}
+        startActivityForResult(m.createScreenCaptureIntent(),REQ_CAPTURE);
     }
-
-    @Override public void onRequestPermissionsResult(int request, String[] permissions, int[] results) {
-        super.onRequestPermissionsResult(request, permissions, results);
-        if (request == REQ_MIC_TEST) {
-            if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) testMicrophoneInput(pendingMicDeviceId);
-            else status.setText("Microphone permission was not granted.");
-        } else if (request == REQ_RECORD_AUDIO) {
-            if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) launchCaptureConsent();
-            else status.setText("Microphone permission is required by Android for playback capture. Permission was not granted.");
+    @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results){
+        super.onRequestPermissionsResult(request,permissions,results);
+        if(request==REQ_RECORD_AUDIO){
+            if(results.length>0 && results[0]==android.content.pm.PackageManager.PERMISSION_GRANTED) launchCaptureConsent();
+            else status.setText("Microphone permission is required by Android for internal playback capture.");
         }
     }
-
-    private void analyzeAndSaveProfile() {
-        File file = recordingFile();
-        if (!file.exists() || file.length() < 16384) {
-            status.setText("No usable recording found. Record at least a few seconds, stop, then analyze.");
-            return;
-        }
-        try {
-            float hz = estimateFundamental(file);
-            if (hz < 65 || hz > 400) {
-                status.setText("No reliable voice pitch detected. Try a clear 5–10 second speech recording with less music/background sound.");
-                return;
-            }
-            savedHz = hz;
-            savedPitch = Math.max(0.50f, Math.min(2.0f, hz / 150.0f));
-            getPreferences(0).edit().putFloat("voice_pitch", savedPitch).putFloat("voice_hz", savedHz).commit();
-            boolean applied = applyPitchToEngine();
-            status.setText(String.format(Locale.US,
-                "PROFILE SAVED: %.0f Hz. TTS pitch factor: %.2fx. %s",
-                savedHz, savedPitch, applied ? "Applied to the TTS engine." : "TTS engine is not ready or rejected the setting."));
-        } catch (Exception e) {
-            status.setText("Pitch analysis failed: " + e.getClass().getSimpleName() + ": " + e.getMessage());
-        }
+    @Override protected void onActivityResult(int req,int result,Intent data){
+        super.onActivityResult(req,result,data);
+        if(req==REQ_AUDIO_FILE&&result==RESULT_OK&&data!=null){
+            Uri uri=data.getData();
+            try{
+                getContentResolver().takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                Intent play=new Intent(this,AudioBridgeService.class).setAction(AudioBridgeService.PLAY).setData(uri)
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    .putExtra(AudioBridgeService.EXTRA_OUTPUT_DEVICE_ID,prefs.getInt(PREF_OUTPUT,0));
+                if(Build.VERSION.SDK_INT>=26)startForegroundService(play);else startService(play);
+                status.setText("Opening audio file through selected output.");
+            }catch(Exception e){status.setText("Could not open selected audio: "+e.getMessage());}
+        }else if(req==REQ_CAPTURE&&result==RESULT_OK&&data!=null){
+            Intent i=new Intent(this,CaptureService.class).setAction("START").putExtra("code",result).putExtra("data",data);
+            if(Build.VERSION.SDK_INT>=26)startForegroundService(i);else startService(i);
+            status.setText("Internal audio capture started.");
+        }else if(req==REQ_CAPTURE)status.setText("Recording permission was cancelled.");
     }
-
-    // Signed 16-bit little-endian stereo PCM, 44.1 kHz. Estimate voiced-window F0
-    // with normalized autocorrelation and use the median to reject outlier windows.
-    private float estimateFundamental(File file) throws IOException {
-        int maxBytes = (int)Math.min(file.length(), 16L * 1024L * 1024L);
-        byte[] bytes = new byte[maxBytes];
-        try (FileInputStream in = new FileInputStream(file)) {
-            int pos = 0, n;
-            while (pos < bytes.length && (n = in.read(bytes, pos, bytes.length - pos)) > 0) pos += n;
-        }
-        int frames = bytes.length / 4;
-        int window = 4096;
-        int hop = 2048;
-        int minLag = SAMPLE_RATE / 400;
-        int maxLag = SAMPLE_RATE / 65;
-        float[] estimates = new float[Math.max(1, frames / hop)];
-        int used = 0;
-        double[] x = new double[window];
-
-        for (int start = 0; start + window <= frames; start += hop) {
-            double mean = 0;
-            for (int i = 0; i < window; i++) {
-                int p = (start + i) * 4;
-                short sample = (short)((bytes[p] & 255) | (bytes[p + 1] << 8));
-                x[i] = sample;
-                mean += sample;
-            }
-            mean /= window;
-            double energy = 0;
-            for (int i = 0; i < window; i++) {
-                x[i] = (x[i] - mean) * (0.5 - 0.5 * Math.cos(2.0 * Math.PI * i / (window - 1)));
-                energy += x[i] * x[i];
-            }
-            double rms = Math.sqrt(energy / window);
-            if (rms < 120) continue;
-
-            int bestLag = -1;
-            double best = 0;
-            for (int lag = minLag; lag <= maxLag; lag++) {
-                double cross = 0, e1 = 0, e2 = 0;
-                for (int i = 0; i < window - lag; i += 2) {
-                    double a = x[i], b = x[i + lag];
-                    cross += a * b;
-                    e1 += a * a;
-                    e2 += b * b;
-                }
-                double norm = cross / Math.sqrt((e1 + 1.0) * (e2 + 1.0));
-                if (norm > best) { best = norm; bestLag = lag; }
-            }
-            if (bestLag > 0 && best > 0.28) estimates[used++] = SAMPLE_RATE / (float)bestLag;
-        }
-        if (used == 0) return 0;
-        Arrays.sort(estimates, 0, used);
-        return estimates[used / 2];
-    }
-
-    private boolean applyPitchToEngine() {
-        if (tts == null || !ttsReady) return false;
-        float factor = Math.max(0.50f, Math.min(2.0f, savedPitch));
-        int pitchResult = tts.setPitch(factor);
-        int rateResult = tts.setSpeechRate(1.0f);
-        return pitchResult == TextToSpeech.SUCCESS && rateResult == TextToSpeech.SUCCESS;
-    }
-
-    // Natural, neutral TTS settings; actual voice comes from the selected Android TTS engine.
-    private void applyNaturalGoogleStyle() {
-        savedPitch = 1.0f;
-        savedHz = 150.0f;
-        getPreferences(0).edit().putFloat("voice_pitch", savedPitch).putFloat("voice_hz", savedHz).commit();
-        boolean applied = applyPitchToEngine();
-        status.setText(applied
-            ? "Natural voice settings applied. For Google's voice, select Speech Recognition & Synthesis from Google in Android TTS settings."
-            : "Natural settings saved. Enable a TTS engine in Android settings, then try again.");
-    }
-
-    private void openTtsSettings() {
-        try {
-            startActivity(new Intent("com.android.settings.TTS_SETTINGS"));
-        } catch (Exception e) {
-            try { startActivity(new Intent("android.settings.SETTINGS")); }
-            catch (Exception ignored) { status.setText("Open Android Settings > Accessibility > Text-to-speech output."); }
-        }
-    }
-
-    // A generic older-male presentation preset; this is not a clone of any real person.
-    private void applyOlderMaleStyle() {
-        savedPitch = 0.78f;
-        savedHz = 117.0f;
-        getPreferences(0).edit().putFloat("voice_pitch", savedPitch).putFloat("voice_hz", savedHz).commit();
-        boolean applied = applyPitchToEngine();
-        status.setText(applied
-            ? "Warm older-male style applied: lower pitch and slower pacing. The installed TTS voice still determines the actual voice and accent."
-            : "Preset saved. Initialize or enable a TTS engine in Android settings, then try again.");
-    }
-
-    private void applySavedProfile() {
-        savedPitch = getPreferences(0).getFloat("voice_pitch", savedPitch);
-        savedHz = getPreferences(0).getFloat("voice_hz", savedHz);
-        boolean applied = applyPitchToEngine();
-        status.setText(String.format(Locale.US,
-            "Saved profile loaded: %.0f Hz (TTS pitch %.2fx). %s",
-            savedHz, savedPitch, applied ? "Pitch setting accepted by TTS." : "TTS is not ready or rejected pitch."));
-    }
-
-    private void speakText() {
-        if (tts == null || !ttsReady) {
-            status.setText("Text-to-speech is not ready. Check Android Text-to-speech settings.");
-            return;
-        }
-        String text = words.getText().toString().trim();
-        if (text.isEmpty()) { status.setText("Type something to speak first."); return; }
-        if (!applyPitchToEngine()) {
-            status.setText("Your TTS engine rejected the saved pitch setting. Try changing the installed TTS voice/engine in Android settings.");
-            return;
-        }
-        Bundle params = new Bundle();
-        params.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f);
-        int result = tts.speak(text, TextToSpeech.QUEUE_FLUSH, params, "soundpad-tts");
-        status.setText(result == TextToSpeech.SUCCESS
-            ? String.format(Locale.US, "Speaking with the selected TTS engine at natural pitch and normal speed.", savedPitch)
-            : "Could not start speech. Check the device TTS engine.");
-    }
-
-    private void playRecording() {
-        final File file = recordingFile();
-        if (!file.exists() || file.length() < 4) {
+    private File captureFile(){return new File(getFilesDir(),"capture.pcm");}
+    // Playback implementation restored from the Nov 8 working recording build.
+    private void playRecording(){
+        final File file=captureFile();
+        if(!file.exists()||file.length()<4){
             status.setText("No recording file found yet. Record internal audio and press Stop recording first.");
             return;
         }
         stopPlayback();
-        playbackRunning = true;
-        playbackThread = new Thread(() -> {
-            AudioTrack track = null;
-            try (FileInputStream in = new FileInputStream(file)) {
-                int min = AudioTrack.getMinBufferSize(SAMPLE_RATE, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT);
-                int bufferSize = Math.max(min, 16384);
-                track = new AudioTrack.Builder()
+        playbackRunning=true;
+        playbackThread=new Thread(()->{
+            AudioTrack track=null;
+            try(FileInputStream in=new FileInputStream(file)){
+                int min=AudioTrack.getMinBufferSize(RATE,AudioFormat.CHANNEL_OUT_STEREO,AudioFormat.ENCODING_PCM_16BIT);
+                int bufferSize=Math.max(min,16384);
+                track=new AudioTrack.Builder()
                     .setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
                         .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
                     .setAudioFormat(new AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                        .setSampleRate(SAMPLE_RATE).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build())
+                        .setSampleRate(RATE).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build())
                     .setBufferSizeInBytes(bufferSize).setTransferMode(AudioTrack.MODE_STREAM).build();
-                playbackTrack = track;
+                if(track.getState()!=AudioTrack.STATE_INITIALIZED)throw new IOException("Audio output could not initialize");
+                AudioDeviceInfo preferred=findOutput(prefs.getInt(PREF_OUTPUT,0));
+                if(preferred!=null)track.setPreferredDevice(preferred);
+                playback=track;
+                int pitchPercent=settingValue(PREF_TTS_PITCH);
+                track.setPlaybackRate(Math.max(8000,Math.min(192000,(int)(RATE*pitchPercent/100.0f))));
                 track.play();
-                byte[] buffer = new byte[8192];
+                byte[] buffer=new byte[8192];
                 int n;
-                while (playbackRunning && (n = in.read(buffer)) != -1) {
-                    int offset = 0;
-                    while (playbackRunning && offset < n) {
-                        int wrote = track.write(buffer, offset, n - offset);
-                        if (wrote < 0) throw new IOException("AudioTrack write error " + wrote);
-                        offset += wrote;
+                while(playbackRunning&&(n=in.read(buffer))!=-1){
+                    int offset=0;
+                    while(playbackRunning&&offset<n){
+                        int wrote=track.write(buffer,offset,n-offset);
+                        if(wrote<0)throw new IOException("AudioTrack write error "+wrote);
+                        if(wrote==0)continue;
+                        offset+=wrote;
                     }
                 }
-                runOnUiThread(() -> status.setText("Recording playback finished."));
-            } catch (Exception e) {
-                runOnUiThread(() -> status.setText("Playback failed: " + e.getClass().getSimpleName() + ": " + e.getMessage()));
-            } finally {
-                playbackRunning = false;
-                playbackTrack = null;
-                if (track != null) {
-                    try { track.stop(); } catch (Exception ignored) {}
-                    track.release();
-                }
+                runOnUiThread(()->status.setText("Recording playback finished."));
+            }catch(Exception e){
+                runOnUiThread(()->status.setText("Playback failed: "+e.getClass().getSimpleName()+": "+e.getMessage()));
+            }finally{
+                playbackRunning=false;
+                playback=null;
+                if(track!=null){try{track.stop();}catch(Exception ignored){}track.release();}
             }
-        }, "SoundPad-playback");
+        },"SoundPad-playback");
         playbackThread.start();
         status.setText("Playing saved internal audio…");
     }
-
-    private void stopPlayback() {
-        playbackRunning = false;
-        AudioTrack track = playbackTrack;
-        if (track != null) {
-            try { track.pause(); track.flush(); } catch (Exception ignored) {}
-        }
+    private void stopPlayback(){playbackRunning=false;AudioTrack t=playback;if(t!=null){try{t.pause();t.flush();}catch(Exception ignored){}}status.setText("Recording playback stopped.");}
+    private void saveRecording(){
+        File f=captureFile();if(!f.exists()||f.length()==0){status.setText("No recording available to save.");return;}
+        try{
+            android.content.ContentValues v=new android.content.ContentValues();v.put(MediaStore.MediaColumns.DISPLAY_NAME,"SoundPad-"+System.currentTimeMillis()+".wav");v.put(MediaStore.MediaColumns.MIME_TYPE,"audio/wav");
+            if(Build.VERSION.SDK_INT>=29)v.put(MediaStore.MediaColumns.RELATIVE_PATH,"Download/");
+            Uri u=getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI,v);if(u==null)throw new IOException("Could not create download file");
+            try(OutputStream out=getContentResolver().openOutputStream(u);FileInputStream in=new FileInputStream(f)){writeWavHeader(out,f.length());byte[] b=new byte[16384];int n;while((n=in.read(b))>0)out.write(b,0,n);}
+            status.setText("Saved WAV recording to Downloads.");
+        }catch(Exception e){status.setText("Save failed: "+e.getMessage());}
     }
-
-    @Override protected void onActivityResult(int request, int result, Intent data) {
-        super.onActivityResult(request, result, data);
-        if (request == REQ_AUDIO_FILE && result == Activity.RESULT_OK && data != null) {
-            selectedAudioUri = data.getData();
-            try { getContentResolver().takePersistableUriPermission(selectedAudioUri, Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Exception ignored) {}
-            status.setText("Audio file selected. Play sends it to the current phone/Bluetooth output.");
-        } else if (request == REQ_AUDIO_FILE) {
-            status.setText("Audio file selection cancelled.");
-        } else if (request == REQ_SCREEN_CAPTURE && result == Activity.RESULT_OK && data != null) {
-            int fps = fpsSpinner != null && fpsSpinner.getSelectedItemPosition() == 1 ? 120 : 60;
-            Intent service = new Intent(this, ScreenRecordService.class).setAction("START")
-                .putExtra("code", result).putExtra("data", data)
-                .putExtra("fps", fps).putExtra("hud", hudToggle != null && hudToggle.isChecked());
-            if (Build.VERSION.SDK_INT >= 26) startForegroundService(service); else startService(service);
-            status.setText("Screen recording started. Requested " + fps + " FPS. Android may cap the actual frame rate.");
-        } else if (request == REQ_SCREEN_CAPTURE) {
-            status.setText("Screen recording permission was cancelled.");
-        } else if (request == REQ_CAPTURE && result == Activity.RESULT_OK && data != null) {
-            Intent service = new Intent(this, CaptureService.class).setAction("START")
-                .putExtra("code", result).putExtra("data", data);
-            if (Build.VERSION.SDK_INT >= 26) startForegroundService(service); else startService(service);
-            status.setText("Capture started. Play permitted audio in another app, then return and stop recording.");
-        } else if (request == REQ_CAPTURE) status.setText("Capture permission was cancelled.");
+    private void writeWavHeader(OutputStream out,long size)throws IOException{
+        ByteBuffer h=ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN);h.put(new byte[]{'R','I','F','F'}).putInt((int)(size+36)).put(new byte[]{'W','A','V','E','f','m','t',' '});
+        h.putInt(16).putShort((short)1).putShort((short)2).putInt(RATE).putInt(RATE*4).putShort((short)4).putShort((short)16).put(new byte[]{'d','a','t','a'}).putInt((int)size);out.write(h.array());
     }
-
-    @Override protected void onDestroy() {
+    @Override protected void onDestroy(){
+        try { unregisterReceiver(captureStatusReceiver); } catch (Exception ignored) {}
         stopPlayback();
-        stopMicMonitor();
-        if (tts != null) { tts.stop(); tts.shutdown(); }
+        if(tts!=null){tts.stop();tts.shutdown();}
         super.onDestroy();
     }
 }

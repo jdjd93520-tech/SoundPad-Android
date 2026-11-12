@@ -30,6 +30,7 @@ public class AudioBridgeService extends Service {
     @Override public void onCreate() {
         super.onCreate();
         audioManager = (android.media.AudioManager) getSystemService(AUDIO_SERVICE);
+        preferredOutputDeviceId = getSharedPreferences("soundpad_audio_settings", MODE_PRIVATE).getInt("output_device_id", 0);
         if (Build.VERSION.SDK_INT >= 26) {
             NotificationChannel channel = new NotificationChannel(CHANNEL, "SoundPad background audio", NotificationManager.IMPORTANCE_LOW);
             getSystemService(NotificationManager.class).createNotificationChannel(channel);
@@ -41,6 +42,7 @@ public class AudioBridgeService extends Service {
         if (SET_OUTPUT_DEVICE.equals(action)) {
             preferredOutputDeviceId = intent.getIntExtra(EXTRA_OUTPUT_DEVICE_ID, 0);
             applyPreferredOutput();
+            if(player==null){stopSelf();return START_NOT_STICKY;}
             showNotification(preferredOutputDeviceId == 0 ? "Using system-default audio output" : "Requested selected audio output");
             return START_NOT_STICKY;
         }
