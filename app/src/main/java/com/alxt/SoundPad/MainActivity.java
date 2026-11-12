@@ -344,6 +344,7 @@ public class MainActivity extends Activity {
             }catch(Exception e){status.setText("Could not open selected audio: "+e.getMessage());}
         }else if(req==REQ_CAPTURE&&result==RESULT_OK&&data!=null){
             Intent i=new Intent(this,CaptureService.class).setAction("START").putExtra("code",result).putExtra("data",data);
+            ParcelFileDescriptor capturePipeWriter = null;
             boolean injectionStarted = false;
             if (injectionService != null) {
                 ParcelFileDescriptor[] pipe = null;
@@ -353,6 +354,7 @@ public class MainActivity extends Activity {
                     try { pipe[0].close(); } catch (Exception ignored) {}
                     if (injectionResult != null && injectionResult.startsWith("OK:")) {
                         i.putExtra("inject_pipe", pipe[1]);
+                        capturePipeWriter = pipe[1];
                         injectionStarted = true;
                     } else {
                         try { pipe[0].close(); } catch (Exception ignored) {}
@@ -367,7 +369,11 @@ public class MainActivity extends Activity {
                     status.setText("Injection unavailable: " + error.getClass().getSimpleName());
                 }
             }
-            if(Build.VERSION.SDK_INT>=26)startForegroundService(i);else startService(i);
+            try {
+                if(Build.VERSION.SDK_INT>=26)startForegroundService(i);else startService(i);
+            } finally {
+                if (capturePipeWriter != null) try { capturePipeWriter.close(); } catch (Exception ignored) {}
+            }
             status.setText(injectionStarted ? "Internal audio capture and microphone injection started." : "Internal audio capture started; microphone injection is not active.");
         }else if(req==REQ_CAPTURE)status.setText("Recording permission was cancelled.");
     }
@@ -439,6 +445,9 @@ public class MainActivity extends Activity {
     }
     @Override protected void onDestroy(){
         try { unregisterReceiver(captureStatusReceiver); } catch (Exception ignored) {}
+        Shizuku.removeBinderReceivedListener(shizukuBinderReceived);
+        Shizuku.removeBinderDeadListener(shizukuBinderDead);
+        Shizuku.removeRequestPermissionResultListener(shizukuPermissionResult);
         stopPlayback();
         if(tts!=null){tts.stop();tts.shutdown();}
         super.onDestroy();
