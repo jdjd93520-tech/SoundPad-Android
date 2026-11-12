@@ -2,7 +2,6 @@ package com.alxt.SoundPad;
 
 import android.app.*;
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.content.pm.ServiceInfo;
 import android.media.*;
 import android.media.projection.*;
@@ -10,7 +9,6 @@ import android.os.*;
 import java.io.*;
 
 public class CaptureService extends Service {
-    private static final String PREFS="soundpad_audio_settings";
     private MediaProjection projection;
     private AudioRecord recorder;
     private volatile boolean recording;
@@ -19,14 +17,11 @@ public class CaptureService extends Service {
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent == null) return START_NOT_STICKY;
-        String action=intent.getAction();
-        if ("STOP".equals(action)) {
+        if ("STOP".equals(intent.getAction())) {
             stopCapture();
-            stopSelf();
             return START_NOT_STICKY;
         }
-        if (!"START".equals(action)) return START_NOT_STICKY;
-        if(recording)return START_NOT_STICKY;
+        if (!"START".equals(intent.getAction())) return START_NOT_STICKY;
 
         createNotificationChannel();
         Notification notification = new Notification.Builder(this, "sp")
@@ -43,9 +38,6 @@ public class CaptureService extends Service {
             projection = manager.getMediaProjection(intent.getIntExtra("code", 0),
                 (Intent)intent.getParcelableExtra("data"));
             if (projection == null) throw new IllegalStateException("MediaProjection permission unavailable");
-            projection.registerCallback(new MediaProjection.Callback() {
-                @Override public void onStop() { stopCapture(); stopSelf(); }
-            },new Handler(Looper.getMainLooper()));
 
             AudioPlaybackCaptureConfiguration config = new AudioPlaybackCaptureConfiguration.Builder(projection)
                 .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
@@ -60,17 +52,17 @@ public class CaptureService extends Service {
             recorder = new AudioRecord.Builder().setAudioFormat(format)
                 .setBufferSizeInBytes(Math.max(min * 2, 32768))
                 .setAudioPlaybackCaptureConfig(config).build();
-            if (recorder.getState() != AudioRecord.STATE_INITIALIZED)
+            if (recorder.getState() != AudioRecord.STATE_INITIALIZED) {
                 throw new IllegalStateException("AudioRecord failed to initialize");
+            }
             recorder.startRecording();
-            if (recorder.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING)
+            if (recorder.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING) {
                 throw new IllegalStateException("Audio capture did not start");
-
+            }
             recording = true;
             writerThread = new Thread(this::writeCapture, "SoundPad-capture-writer");
             writerThread.start();
         } catch (Exception e) {
-            broadcastStatus("Internal audio capture failed: " + e.getMessage());
             stopCapture();
             stopSelf();
         }
@@ -86,22 +78,15 @@ public class CaptureService extends Service {
                 synchronized (lock) { active = recorder; }
                 if (active == null) break;
                 int count = active.read(buffer, 0, buffer.length, AudioRecord.READ_BLOCKING);
-                if (count > 0) {
-                    stream.write(buffer, 0, count);
-                } else if (count < 0) {
-                    if (recording) throw new IOException("Audio capture read failed (" + count + ")");
-                    break;
+                if (count > 0) stream.write(buffer, 0, count);
+                else if (count < 0 && count != AudioRecord.ERROR_INVALID_OPERATION) {
+                    throw new IOException("AudioRecord read error " + count);
                 }
             }
             stream.flush();
-            broadcastStatus("Internal audio recording saved and ready to play.");
         } catch (Exception e) {
-            if (recording) broadcastStatus("Internal audio recording stopped: " + e.getMessage());
+            // The partial recording remains playable if at least one buffer was written.
         } finally {
-            stopCapture();
-            synchronized (lock) {
-                if (writerThread == Thread.currentThread()) writerThread = null;
-            }
             stopSelf();
         }
     }
@@ -118,23 +103,14 @@ public class CaptureService extends Service {
         recording = false;
         AudioRecord active;
         MediaProjection activeProjection;
-        Thread writer;
         synchronized (lock) {
             active = recorder;
             recorder = null;
             activeProjection = projection;
             projection = null;
-            writer = writerThread;
         }
         if (active != null) {
             try { active.stop(); } catch (Exception ignored) {}
-        }
-        if (writer != null && writer != Thread.currentThread()) {
-            try { writer.join(2500); } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        }
-        if (active != null) {
             try { active.release(); } catch (Exception ignored) {}
         }
         if (activeProjection != null) {
@@ -143,13 +119,10 @@ public class CaptureService extends Service {
         stopForeground(true);
     }
 
-    private void broadcastStatus(String message) {
-        Intent update = new Intent("com.alxt.SoundPad.CAPTURE_STATUS");
-        update.setPackage(getPackageName());
-        update.putExtra("message", message);
-        sendBroadcast(update);
+    @Override public void onDestroy() {
+        stopCapture();
+        super.onDestroy();
     }
 
-    @Override public void onDestroy() { stopCapture(); super.onDestroy(); }
     @Override public IBinder onBind(Intent intent) { return null; }
 }
