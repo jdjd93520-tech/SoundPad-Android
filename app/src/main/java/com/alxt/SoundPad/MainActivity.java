@@ -2,6 +2,11 @@ package com.alxt.SoundPad;
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.ComponentName;
+import android.content.ServiceConnection;
+import android.os.IBinder;
+import android.os.Parcel;
+import rikka.shizuku.Shizuku;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.media.*;
@@ -34,6 +39,22 @@ public class MainActivity extends Activity {
     private Thread monitorThread;
     private final AtomicBoolean monitorRunning = new AtomicBoolean(false);
     private volatile boolean playbackRunning = false;
+    private IBinder injectorBinder;
+    private boolean injectorBound = false;
+    private static final String INJECTOR_DESCRIPTOR = "com.alxt.SoundPad.IVirtualMic";
+    private static final int INJECTOR_START = IBinder.FIRST_CALL_TRANSACTION;
+    private static final int INJECTOR_WRITE = IBinder.FIRST_CALL_TRANSACTION + 1;
+    private static final int INJECTOR_STOP = IBinder.FIRST_CALL_TRANSACTION + 2;
+    private final ServiceConnection injectorConnection = new ServiceConnection() {
+        @Override public void onServiceConnected(ComponentName name, IBinder service) {
+            injectorBinder = service;
+            status.setText("Shizuku audio injector connected.");
+        }
+        @Override public void onServiceDisconnected(ComponentName name) {
+            injectorBinder = null;
+            status.setText("Shizuku injector disconnected.");
+        }
+    };
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -63,6 +84,8 @@ public class MainActivity extends Activity {
             if (tts != null) tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "soundpad-utterance");
         });
         button(root, "STOP SPEAKING", v -> { if (tts != null) tts.stop(); });
+        button(root, "ENABLE VIRTUAL MIC FOR PUBG (EXPERIMENTAL)", v -> bindInjector());
+        button(root, "DISABLE VIRTUAL MIC", v -> stopInjector());
 
         section(root, "Internal audio recording");
         button(root, "START INTERNAL AUDIO RECORDING", v -> requestInternalCapture());
@@ -101,8 +124,94 @@ public class MainActivity extends Activity {
                 if (language == TextToSpeech.LANG_MISSING_DATA || language == TextToSpeech.LANG_NOT_SUPPORTED)
                     language = tts.setLanguage(Locale.US);
                 status.setText(language >= TextToSpeech.LANG_AVAILABLE ? "Text-to-speech ready." : "Install a supported Android TTS voice.");
+                tts.setOnUtteranceProgressListener(new android.speech.tts.UtteranceProgressListener() {
+                    @Override public void onStart(String id) {}
+                    @Override public void onDone(String id) { runOnUiThread(() -> status.setText("Speech finished.")); }
+                    @Override public void onError(String id) { runOnUiThread(() -> status.setText("Speech synthesis failed.")); }
+                    @Override public void onBeginSynthesis(String id, int sampleRate, int audioFormat, int channelCount) {
+                        startInjectorTrack(sampleRate, channelCount);
+                    }
+                    @Override public void onAudioAvailable(String id, byte[] audio) { writeInjectorAudio(audio); }
+                });
             } else status.setText("Text-to-speech could not initialize.");
         });
+    }
+
+
+    private void bindInjector() {
+        if (!Shizuku.pingBinder()) { status.setText("Start Shizuku first."); return; }
+        if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
+            Shizuku.requestPermission(42);
+            status.setText("Grant SoundPad permission in Shizuku, then tap Enable again.");
+            return;
+        }
+        if (injectorBound) { status.setText("Virtual mic service already bound."); return; }
+        Shizuku.UserServiceArgs args = new Shizuku.UserServiceArgs(
+            new ComponentName(this, VirtualMicUserService.class))
+            .daemon(false).processNameSuffix("soundpad_audio")
+            .debuggable(BuildConfig.DEBUG).version(1);
+        Shizuku.bindUserService(args, injectorConnection);
+        injectorBound = true;
+        status.setText("Connecting to Shizuku audio injector…");
+    }
+
+    private int findPubgUid() throws Exception {
+        String[] packages = {"com.tencent.ig", "com.pubg.imobile", "com.tencent.iglite"};
+        for (String pkg : packages) {
+            try { return getPackageManager().getApplicationInfo(pkg, 0).uid; }
+            catch (PackageManager.NameNotFoundException ignored) {}
+        }
+        throw new IllegalStateException("PUBG Mobile package not found on this device.");
+    }
+
+    private void startInjectorTrack(int sampleRate, int channels) {
+        IBinder b = injectorBinder;
+        if (b == null || !b.isBinderAlive()) return;
+        Parcel data = Parcel.obtain(), reply = Parcel.obtain();
+        try {
+            data.writeInterfaceToken(INJECTOR_DESCRIPTOR);
+            data.writeInt(findPubgUid());
+            data.writeInt(sampleRate);
+            data.writeInt(channels);
+            b.transact(INJECTOR_START, data, reply, 0);
+            reply.readException();
+            status.setText("Virtual mic injector registered. PUBG compatibility is not yet verified.");
+        } catch (Exception e) {
+            status.setText("Virtual mic setup failed: " + e.getMessage());
+        } finally { data.recycle(); reply.recycle(); }
+    }
+
+    private void writeInjectorAudio(byte[] audio) {
+        IBinder b = injectorBinder;
+        if (b == null || !b.isBinderAlive()) return;
+        Parcel data = Parcel.obtain(), reply = Parcel.obtain();
+        try {
+            data.writeInterfaceToken(INJECTOR_DESCRIPTOR);
+            data.writeByteArray(audio);
+            b.transact(INJECTOR_WRITE, data, reply, IBinder.FLAG_ONEWAY);
+        } catch (Exception ignored) {
+        } finally { data.recycle(); reply.recycle(); }
+    }
+
+    private void stopInjector() {
+        IBinder b = injectorBinder;
+        if (b != null && b.isBinderAlive()) {
+            Parcel data = Parcel.obtain(), reply = Parcel.obtain();
+            try {
+                data.writeInterfaceToken(INJECTOR_DESCRIPTOR);
+                b.transact(INJECTOR_STOP, data, reply, 0);
+            } catch (Exception ignored) {}
+            finally { data.recycle(); reply.recycle(); }
+        }
+        if (injectorBound) {
+            Shizuku.unbindUserService(new Shizuku.UserServiceArgs(
+                new ComponentName(this, VirtualMicUserService.class))
+                .daemon(false).processNameSuffix("soundpad_audio")
+                .debuggable(BuildConfig.DEBUG).version(1), injectorConnection, true);
+            injectorBound = false;
+        }
+        injectorBinder = null;
+        status.setText("Virtual mic disabled.");
     }
 
     private void section(LinearLayout root, String text) {
@@ -257,7 +366,7 @@ public class MainActivity extends Activity {
         h.put(new byte[]{'d','a','t','a'}).putInt((int)dataSize); out.write(h.array());
     }
     @Override protected void onDestroy() {
-        stopInternalPlayback(); stopMicMonitor();
+        stopInternalPlayback(); stopMicMonitor(); stopInjector();
         if (tts != null) { tts.stop(); tts.shutdown(); }
         super.onDestroy();
     }
