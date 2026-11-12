@@ -178,7 +178,7 @@ public class MainActivity extends Activity {
     }
     private void handleFloatingAction(Intent intent){ if(intent==null)return; String a=intent.getAction(); if(ACTION_FLOAT_START_RECORD.equals(a)){ requestCapture(); } else if(ACTION_FLOAT_PLAY_RECORD.equals(a)){ playRecording(); } }
     @Override protected void onNewIntent(Intent intent){ super.onNewIntent(intent); setIntent(intent); handleFloatingAction(intent); }
-    private void section(LinearLayout root,String value){TextView t=new TextView(this);t.setText("\\n"+value);t.setTextSize(21);t.setPadding(0,18,0,8);root.addView(t);}
+    private void section(LinearLayout root,String value){TextView t=new TextView(this);t.setText("\n"+value);t.setTextSize(21);t.setPadding(0,18,0,8);root.addView(t);}
     private void button(LinearLayout root,String label,android.view.View.OnClickListener click){Button b=new Button(this);b.setText(label);root.addView(b,new LinearLayout.LayoutParams(-1,-2));b.setOnClickListener(click);}
     private void startFloating(){
         if(Build.VERSION.SDK_INT>=23 && !android.provider.Settings.canDrawOverlays(this)){
