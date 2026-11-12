@@ -33,12 +33,14 @@ public class CaptureService extends Service {
         if ("SET_MONITOR".equals(action)) {
             monitorEnabled=intent.getBooleanExtra("monitor_enabled",true);
             getSharedPreferences(PREFS,MODE_PRIVATE).edit().putBoolean(PREF_MONITOR,monitorEnabled).apply();
+            if(!recording){stopSelf();return START_NOT_STICKY;}
             updateMonitor();
             return START_NOT_STICKY;
         }
         if ("SET_OUTPUT_DEVICE".equals(action)) {
             preferredOutputId=intent.getIntExtra("output_device_id",0);
             getSharedPreferences(PREFS,MODE_PRIVATE).edit().putInt(PREF_OUTPUT,preferredOutputId).apply();
+            if(!recording){stopSelf();return START_NOT_STICKY;}
             synchronized(lock) {
                 if(monitorTrack!=null) {
                     AudioDeviceInfo device=findOutput(preferredOutputId);
