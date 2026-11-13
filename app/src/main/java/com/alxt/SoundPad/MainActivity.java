@@ -18,7 +18,8 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
-import rikka.shizuku.Shizuku;
+import android.app.ActivityOptions;
+import android.graphics.Rect;
 
 public class MainActivity extends Activity {
     private static final int REQ_CAPTURE = 10, REQ_MIC = 11;
@@ -114,38 +115,26 @@ public class MainActivity extends Activity {
     }
 
     private void openFreeformWindow() {
-        if (!Shizuku.pingBinder()) {
-            status.setText("Start Shizuku and connect SoundPad first.");
+        if (Build.VERSION.SDK_INT < 24) {
+            status.setText("Freeform window launch requires Android 7.0 or newer and device support.");
             return;
         }
-        if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
-            launchOwnActivityInFreeform();
-            return;
+        android.util.DisplayMetrics metrics = getResources().getDisplayMetrics();
+        int width = Math.max(320, (int)(metrics.widthPixels * 0.82f));
+        int height = Math.max(480, (int)(metrics.heightPixels * 0.82f));
+        int left = Math.max(0, (metrics.widthPixels - width) / 2);
+        int top = Math.max(0, (metrics.heightPixels - height) / 8);
+        Rect bounds = new Rect(left, top, left + width, top + height);
+        try {
+            Intent intent = new Intent(this, MainActivity.class)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_MULTIPLE_TASK);
+            ActivityOptions options = ActivityOptions.makeBasic();
+            options.setLaunchBounds(bounds);
+            startActivity(intent, options.toBundle());
+            status.setText("Freeform window requested. If your Android build supports freeform, use its title bar to move, resize, minimize and restore SoundPad.");
+        } catch (Exception e) {
+            status.setText("Could not request a freeform window: " + e.getMessage());
         }
-        Shizuku.addRequestPermissionResultListener((requestCode, grantResult) -> {
-            if (requestCode != 42) return;
-            if (grantResult == PackageManager.PERMISSION_GRANTED) launchOwnActivityInFreeform();
-            else runOnUiThread(() -> status.setText("Shizuku permission was not granted."));
-        });
-        Shizuku.requestPermission(42);
-        status.setText("Waiting for Shizuku permission…");
-    }
-
-    private void launchOwnActivityInFreeform() {
-        new Thread(() -> {
-            try {
-                String component = getPackageName() + "/.MainActivity";
-                Process process = Shizuku.newProcess(
-                    new String[]{"sh", "-c", "am start --windowingMode 5 -n " + component},
-                    null, null);
-                int result = process.waitFor();
-                runOnUiThread(() -> status.setText(result == 0
-                    ? "Freeform launch requested. Your Android system controls window movement and sizing."
-                    : "The device rejected freeform mode; opening SoundPad normally may still work."));
-            } catch (Exception e) {
-                runOnUiThread(() -> status.setText("Could not request freeform mode: " + e.getMessage()));
-            }
-        }, "SoundPad-freeform-launch").start();
     }
 
     private void section(LinearLayout root, String text) {
