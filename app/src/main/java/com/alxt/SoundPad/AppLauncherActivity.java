@@ -173,9 +173,9 @@ public class AppLauncherActivity extends Activity {
         String command = "am start --user current --windowingMode 5 -n '" + flattened + "'"
                 + " >/dev/null 2>&1; sleep 2; "
                 + "TASK_ID=$(dumpsys activity activities | awk -v pkg='" + PUBG_PACKAGE + "' "
-                + "'/Task\\{/ { id=\\"\\"; if (match($0, /#[0-9]+/)) id=substr($0, RSTART+1, RLENGTH-1) } "
-                + "index($0,pkg) && id != \\"\\" { print id; exit }'); "
-                + "if [ -z \\"$TASK_ID\\" ]; then echo 'PUBG task was not found after launch'; exit 2; fi; "
+                + "'/Task\\\\{/ { id=0; if (match($0, /#[0-9]+/)) id=substr($0, RSTART+1, RLENGTH-1) } "
+                + "index($0,pkg) && id>0 { print id; exit }'); "
+                + "if [ -z $TASK_ID ]; then echo PUBG_task_not_found; exit 2; fi; "
                 + "am task resize $TASK_ID " + left + " " + top + " " + right + " " + bottom;
 
         status.setText("Opening PUBG, then resizing its window to " + targetW + " × " + targetH + "…");
