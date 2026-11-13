@@ -165,14 +165,15 @@ public class AppLauncherActivity extends Activity {
         int right = left + Math.min(w, displayW);
         int bottom = top + Math.min(h, displayH);
         String flattened = component.flattenToShortString();
-        String command = "am start --user current --windowingMode 5 --activity-bounds "
-                + left + "," + top + "," + right + "," + bottom + " -n '" + flattened + "'";
+        // `am start` supports --windowingMode, but not --activity-bounds.
+        // Let Android choose the initial freeform window bounds.
+        String command = "am start --user current --windowingMode 5 -n '" + flattened + "'";
         status.setText("Requesting PUBG freeform window " + w + " × " + h + "…");
         new Thread(() -> {
             try {
                 String result = shell(command);
                 runOnUiThread(() -> status.setText(result.trim().isEmpty()
-                        ? "Freeform launch request sent. If PUBG opens full-screen, your Android build may not support freeform."
+                        ? "PUBG launch request sent in freeform mode. Android chooses the initial window size; custom bounds are not applied by this launch command. If PUBG opens full-screen, freeform may be unsupported or blocked."
                         : result.trim()));
             } catch (Exception e) {
                 runOnUiThread(() -> status.setText("Freeform launch failed: " + e.getMessage()
