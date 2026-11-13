@@ -160,24 +160,34 @@ public class AppLauncherActivity extends Activity {
         Point p = screenSize();
         int displayW = Math.max(1, p.x);
         int displayH = Math.max(1, p.y);
-        int left = Math.max(0, (displayW - Math.min(w, displayW)) / 2);
-        int top = Math.max(0, (displayH - Math.min(h, displayH)) / 2);
-        int right = left + Math.min(w, displayW);
-        int bottom = top + Math.min(h, displayH);
+        int targetW = Math.min(w, displayW);
+        int targetH = Math.min(h, displayH);
+        int left = Math.max(0, (displayW - targetW) / 2);
+        int top = Math.max(0, (displayH - targetH) / 2);
+        int right = left + targetW;
+        int bottom = top + targetH;
         String flattened = component.flattenToShortString();
-        // `am start` supports --windowingMode, but not --activity-bounds.
-        // Let Android choose the initial freeform window bounds.
-        String command = "am start --user current --windowingMode 5 -n '" + flattened + "'";
-        status.setText("Requesting PUBG freeform window " + w + " × " + h + "…");
+
+        // Launch PUBG in freeform, find its task ID, then resize only that task.
+        // This does not use wm size/density and does not alter the device display.
+        String command = "am start --user current --windowingMode 5 -n '" + flattened + "'"
+                + " >/dev/null 2>&1; sleep 2; "
+                + "TASK_ID=$(dumpsys activity activities | awk -v pkg='" + PUBG_PACKAGE + "' "
+                + "'/Task\\{/ { id=\\"\\"; if (match($0, /#[0-9]+/)) id=substr($0, RSTART+1, RLENGTH-1) } "
+                + "index($0,pkg) && id != \\"\\" { print id; exit }'); "
+                + "if [ -z \\"$TASK_ID\\" ]; then echo 'PUBG task was not found after launch'; exit 2; fi; "
+                + "am task resize $TASK_ID " + left + " " + top + " " + right + " " + bottom;
+
+        status.setText("Opening PUBG, then resizing its window to " + targetW + " × " + targetH + "…");
         new Thread(() -> {
             try {
                 String result = shell(command);
-                runOnUiThread(() -> status.setText(result.trim().isEmpty()
-                        ? "PUBG launch request sent in freeform mode. Android chooses the initial window size; custom bounds are not applied by this launch command. If PUBG opens full-screen, freeform may be unsupported or blocked."
-                        : result.trim()));
+                runOnUiThread(() -> status.setText("PUBG launch and resize command completed. "
+                        + (result.trim().isEmpty() ? "If PUBG stayed full-screen, this Android build or the game may block freeform resizing."
+                        : result.trim())));
             } catch (Exception e) {
-                runOnUiThread(() -> status.setText("Freeform launch failed: " + e.getMessage()
-                        + ". Enable freeform windows in Developer options if your device provides that setting."));
+                runOnUiThread(() -> status.setText("PUBG launch/resize failed: " + e.getMessage()
+                        + ". Freeform support and task resizing depend on your Android version."));
             }
         }, "PUBG-freeform-launch").start();
     }
