@@ -1,5 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
@@ -13,6 +14,7 @@
         <provider android:name="rikka.shizuku.ShizukuProvider" android:authorities="${applicationId}.shizuku" android:multiprocess="false" android:enabled="true" android:exported="true" android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
         <service android:name=".FloatingSoundboardService" android:exported="false" />
         <activity android:name=".BrowserActivity" android:exported="false" android:resizeableActivity="true" />
+        <activity android:name=".AppLauncherActivity" android:exported="false" android:resizeableActivity="true" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
