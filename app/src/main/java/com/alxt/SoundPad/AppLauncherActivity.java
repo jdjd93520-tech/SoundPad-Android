@@ -45,7 +45,8 @@ public class AppLauncherActivity extends Activity {
     private TextView displayStatus;
     private final ArrayList<ApplicationInfo> apps = new ArrayList<>();
     private int widthDp, heightDp;
-    private boolean pendingEnable;\n    private boolean initializing = true;
+    private boolean pendingEnable;
+    private boolean initializing = true;
     private final BroadcastReceiver screenOffReceiver = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
             if (Intent.ACTION_SCREEN_OFF.equals(intent.getAction())) restoreDisplay("Screen turned off; original display restored.");
