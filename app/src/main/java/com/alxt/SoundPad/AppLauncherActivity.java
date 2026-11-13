@@ -1,29 +1,24 @@
 package com.alxt.SoundPad;
 
 import android.app.Activity;
+import android.content.ComponentName;
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.graphics.Point;
 import android.os.Bundle;
-import android.util.DisplayMetrics;
 import android.view.Gravity;
+import android.view.WindowManager;
 import android.widget.*;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.lang.reflect.Method;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import rikka.shizuku.Shizuku;
 
 public class AppLauncherActivity extends Activity {
     private static final int REQUEST_SHIZUKU = 7712;
-    private static final String PREFS = "pubg_display";
-    private static final String ACTIVE = "active";
-    private static final String ORIGINAL = "original";
     private static final String PUBG_PACKAGE = "com.tencent.ig";
     private EditText width, height;
     private TextView status;
-    private Switch stretch;
     private boolean permissionPending;
 
     @Override public void onCreate(Bundle state) {
@@ -35,20 +30,20 @@ public class AppLauncherActivity extends Activity {
         root.setBackgroundColor(0xFF101820);
 
         TextView title = new TextView(this);
-        title.setText("PUBG MOBILE — STRETCHED");
+        title.setText("PUBG MOBILE — FREEFORM");
         title.setTextColor(0xFFFFFFFF);
         title.setTextSize(23);
         title.setGravity(Gravity.CENTER);
         root.addView(title, new LinearLayout.LayoutParams(-1, -2));
 
         TextView subtitle = new TextView(this);
-        subtitle.setText("Shizuku display profiles and one-tap PUBG launcher");
+        subtitle.setText("Launch PUBG in its own resizable window");
         subtitle.setTextColor(0xFFB8C7D9);
         subtitle.setGravity(Gravity.CENTER);
         root.addView(subtitle);
 
         TextView ratioLabel = new TextView(this);
-        ratioLabel.setText("Display aspect ratio");
+        ratioLabel.setText("PUBG window aspect ratio");
         ratioLabel.setTextColor(0xFFFFFFFF);
         ratioLabel.setTextSize(17);
         root.addView(ratioLabel);
@@ -63,156 +58,151 @@ public class AppLauncherActivity extends Activity {
 
         LinearLayout values = new LinearLayout(this);
         values.setOrientation(LinearLayout.HORIZONTAL);
-        width = new EditText(this);
-        width.setSingleLine(true);
-        width.setInputType(2);
-        width.setTextColor(0xFFFFFFFF);
-        width.setHintTextColor(0xFFB8C7D9);
-        width.setHint("Width px");
-        height = new EditText(this);
-        height.setSingleLine(true);
-        height.setInputType(2);
-        height.setTextColor(0xFFFFFFFF);
-        height.setHintTextColor(0xFFB8C7D9);
-        height.setHint("Height px");
-        DisplayMetrics dm = new DisplayMetrics();
-        getWindowManager().getDefaultDisplay().getRealMetrics(dm);
-        int longEdge = Math.max(dm.widthPixels, dm.heightPixels);
-        width.setText(String.valueOf(longEdge));
-        height.setText(String.valueOf(Math.min(dm.widthPixels, dm.heightPixels)));
+        width = field("Window width px");
+        height = field("Window height px");
+        Point screen = screenSize();
+        width.setText(String.valueOf(Math.max(screen.x, screen.y)));
+        height.setText(String.valueOf(Math.min(screen.x, screen.y)));
         values.addView(width, new LinearLayout.LayoutParams(0, 58, 1));
         values.addView(height, new LinearLayout.LayoutParams(0, 58, 1));
         root.addView(values);
 
-        stretch = new Switch(this);
-        stretch.setText("Enable stretched display (Shizuku)");
-        stretch.setTextColor(0xFFFFFFFF);
-        stretch.setChecked(prefs().getBoolean(ACTIVE, false));
-        root.addView(stretch);
-
-        Button apply = button("APPLY STRETCHED RESOLUTION");
-        root.addView(apply, full());
-        apply.setOnClickListener(v -> applyDisplay());
-
-        Button launch = button("OPEN PUBG MOBILE");
+        Button launch = button("OPEN PUBG IN FREEFORM");
         root.addView(launch, full());
         launch.setOnClickListener(v -> launchPubg());
 
-        Button reset = button("RESET DISPLAY");
-        root.addView(reset, full());
-        reset.setOnClickListener(v -> resetDisplay());
-
         status = new TextView(this);
         status.setTextColor(0xFFFFD180);
-        status.setText("PUBG Mobile Global package: " + PUBG_PACKAGE + "\nStart Shizuku, grant permission, choose a ratio, apply, then launch PUBG.");
         status.setPadding(0, 18, 0, 12);
+        status.setText("Target: PUBG Mobile Global (" + PUBG_PACKAGE + "). Choose a window size, then launch.");
         root.addView(status);
 
         TextView warning = new TextView(this);
         warning.setTextColor(0xFFB8C7D9);
         warning.setTextSize(12);
-        warning.setText("This changes Android's logical display size system-wide while enabled, not just PUBG. Reset restores the saved prior override. Android, the device manufacturer, or PUBG may letterbox, crop, or ignore the requested ratio; true GPU/panel stretching is not available through standard Shizuku commands.");
+        warning.setText("This version does NOT change Android's display resolution or affect other apps. Freeform window support must be enabled by your Android device. PUBG may refuse resizable/windowed mode, and a freeform window is not the same as full-screen GPU stretching.");
         root.addView(warning);
         setContentView(root);
-
-        stretch.setOnCheckedChangeListener((v, checked) -> {
-            if (checked) applyDisplay();
-            else resetDisplay();
-        });
     }
 
-    private SharedPreferences prefs() { return getSharedPreferences(PREFS, MODE_PRIVATE); }
+    private EditText field(String hint) {
+        EditText e = new EditText(this);
+        e.setSingleLine(true);
+        e.setInputType(2);
+        e.setTextColor(0xFFFFFFFF);
+        e.setHintTextColor(0xFFB8C7D9);
+        e.setHint(hint);
+        return e;
+    }
+
     private LinearLayout.LayoutParams full() { return new LinearLayout.LayoutParams(-1, -2); }
     private Button button(String label) {
-        Button b = new Button(this); b.setText(label); b.setAllCaps(false); return b;
+        Button b = new Button(this);
+        b.setText(label);
+        b.setAllCaps(false);
+        return b;
     }
+
+    private Point screenSize() {
+        Point p = new Point();
+        getWindowManager().getDefaultDisplay().getRealSize(p);
+        return p;
+    }
+
     private void addPreset(LinearLayout row, String label, int rw, int rh) {
         Button b = button(label);
         row.addView(b, new LinearLayout.LayoutParams(0, 52, 1));
         b.setOnClickListener(v -> {
-            DisplayMetrics dm = new DisplayMetrics();
-            getWindowManager().getDefaultDisplay().getRealMetrics(dm);
-            int longEdge = Math.max(dm.widthPixels, dm.heightPixels);
+            Point p = screenSize();
+            int longEdge = Math.max(p.x, p.y);
             int shortEdge = Math.max(200, Math.round(longEdge * (Math.min(rw, rh) / (float)Math.max(rw, rh))));
-            if (rw >= rh) { width.setText(String.valueOf(longEdge)); height.setText(String.valueOf(shortEdge)); }
-            else { width.setText(String.valueOf(shortEdge)); height.setText(String.valueOf(longEdge)); }
+            width.setText(String.valueOf(longEdge));
+            height.setText(String.valueOf(shortEdge));
         });
     }
+
     private int number(EditText field) {
         try { return Math.max(200, Math.min(5000, Integer.parseInt(field.getText().toString().trim()))); }
         catch (Exception e) { return 0; }
     }
-    private void applyDisplay() {
-        if (!stretch.isChecked()) stretch.setChecked(true);
-        if (!Shizuku.pingBinder()) { status.setText("Shizuku is not running. Start Shizuku and try again."); stretch.setChecked(false); return; }
+
+    private void launchPubg() {
+        int w = number(width);
+        int h = number(height);
+        if (w == 0 || h == 0) {
+            status.setText("Enter valid window width and height values.");
+            return;
+        }
+        Intent launchIntent = getPackageManager().getLaunchIntentForPackage(PUBG_PACKAGE);
+        if (launchIntent == null) {
+            status.setText("PUBG Mobile Global was not found. This build targets " + PUBG_PACKAGE + ".");
+            return;
+        }
+        ComponentName component = launchIntent.getComponent();
+        if (component == null) {
+            status.setText("Could not resolve PUBG's launch activity.");
+            return;
+        }
+        if (!Shizuku.pingBinder()) {
+            status.setText("Start Shizuku first. It is used only to request the freeform launch.");
+            return;
+        }
         if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
             permissionPending = true;
             status.setText("Waiting for Shizuku permission…");
             Shizuku.requestPermission(REQUEST_SHIZUKU);
             return;
         }
-        int w = number(width), h = number(height);
-        if (w == 0 || h == 0) { status.setText("Enter valid width and height values."); return; }
+        launchFreeform(component, w, h);
+    }
+
+    private void launchFreeform(ComponentName component, int w, int h) {
+        Point p = screenSize();
+        int displayW = Math.max(1, p.x);
+        int displayH = Math.max(1, p.y);
+        int left = Math.max(0, (displayW - Math.min(w, displayW)) / 2);
+        int top = Math.max(0, (displayH - Math.min(h, displayH)) / 2);
+        int right = left + Math.min(w, displayW);
+        int bottom = top + Math.min(h, displayH);
+        String flattened = component.flattenToShortString();
+        String command = "am start --user current --windowingMode 5 --activity-bounds "
+                + left + "," + top + "," + right + "," + bottom + " -n '" + flattened + "'";
+        status.setText("Requesting PUBG freeform window " + w + " × " + h + "…");
         new Thread(() -> {
             try {
-                String current = shell("wm size");
-                if (!prefs().getBoolean(ACTIVE, false)) {
-                    Matcher m = Pattern.compile("Override size:\\s*(\\d+x\\d+)").matcher(current);
-                    prefs().edit().putString(ORIGINAL, m.find() ? m.group(1) : "").apply();
-                }
-                shell("wm size " + w + "x" + h);
-                prefs().edit().putBoolean(ACTIVE, true).apply();
-                runOnUiThread(() -> status.setText("Applied " + w + " × " + h + " logical pixels. Now launch PUBG Mobile."));
+                String result = shell(command);
+                runOnUiThread(() -> status.setText(result.trim().isEmpty()
+                        ? "Freeform launch request sent. If PUBG opens full-screen, your Android build may not support freeform."
+                        : result.trim()));
             } catch (Exception e) {
-                runOnUiThread(() -> { status.setText("Apply failed: " + e.getMessage()); stretch.setChecked(false); });
+                runOnUiThread(() -> status.setText("Freeform launch failed: " + e.getMessage()
+                        + ". Enable freeform windows in Developer options if your device provides that setting."));
             }
-        }, "PUBG-display-apply").start();
+        }, "PUBG-freeform-launch").start();
     }
-    private void resetDisplay() {
-        if (!prefs().getBoolean(ACTIVE, false)) { if (status != null) status.setText("No display override to reset."); return; }
-        if (!Shizuku.pingBinder() || Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
-            status.setText("Reconnect Shizuku and grant permission to restore the previous display setting.");
-            if (stretch != null && !stretch.isChecked()) stretch.setChecked(true);
-            return;
-        }
-        new Thread(() -> {
-            try {
-                String previous = prefs().getString(ORIGINAL, "");
-                if (previous == null || previous.isEmpty()) shell("wm size reset");
-                else shell("wm size " + previous);
-                prefs().edit().putBoolean(ACTIVE, false).remove(ORIGINAL).apply();
-                runOnUiThread(() -> { status.setText("Original display setting restored."); if (stretch.isChecked()) stretch.setChecked(false); });
-            } catch (Exception e) {
-                runOnUiThread(() -> status.setText("Reset failed: " + e.getMessage()));
-            }
-        }, "PUBG-display-reset").start();
-    }
-    private void launchPubg() {
-        Intent intent = getPackageManager().getLaunchIntentForPackage(PUBG_PACKAGE);
-        if (intent == null) {
-            status.setText("PUBG Mobile Global was not found. This build targets package " + PUBG_PACKAGE + ".");
-            return;
-        }
-        try { startActivity(intent); }
-        catch (Exception e) { status.setText("Could not launch PUBG: " + e.getMessage()); }
-    }
+
     private String shell(String command) throws Exception {
         Method m = Shizuku.class.getDeclaredMethod("newProcess", String[].class, String[].class, String.class);
         m.setAccessible(true);
         Process p = (Process)m.invoke(null, new String[]{"sh", "-c", command}, null, null);
         StringBuilder out = new StringBuilder();
-        try (BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
-            String line; while ((line = reader.readLine()) != null) out.append(line).append('\n');
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(p.getInputStream()));
+             BufferedReader errors = new BufferedReader(new InputStreamReader(p.getErrorStream()))) {
+            String line;
+            while ((line = reader.readLine()) != null) out.append(line).append('\n');
+            while ((line = errors.readLine()) != null) out.append(line).append('\n');
         }
         int code = p.waitFor();
-        if (code != 0) throw new IllegalStateException("Command exit " + code);
+        if (code != 0) throw new IllegalStateException("shell exit " + code + (out.length() == 0 ? "" : ": " + out.toString().trim()));
         return out.toString();
     }
+
     @Override protected void onResume() {
         super.onResume();
-        if (permissionPending && Shizuku.pingBinder() && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
+        if (permissionPending && Shizuku.pingBinder()
+                && Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
             permissionPending = false;
-            applyDisplay();
+            launchPubg();
         }
     }
 }
