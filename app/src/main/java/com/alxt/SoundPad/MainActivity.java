@@ -82,6 +82,7 @@ public class MainActivity extends Activity {
         section(root, "Freeform and browser");
         button(root, "OPEN FULL SOUNDPAD IN FREEFORM WINDOW", v -> openFreeformWindow());
         button(root, "OPEN BUILT-IN BROWSER", v -> startActivity(new Intent(this, BrowserActivity.class)));
+        button(root, "OPEN OTHER APPS IN FREEFORM", v -> startActivity(new Intent(this, AppLauncherActivity.class)));
         TextView freeformInfo = new TextView(this);
         freeformInfo.setText("Freeform launch requires Shizuku permission and Android/device support for freeform windows. The system controls moving, resizing, minimizing and restoring the activity; unsupported devices may open it normally.");
         root.addView(freeformInfo);
