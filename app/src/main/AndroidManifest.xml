@@ -1,4 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
@@ -6,8 +8,19 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <application
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
-        android:label="SoundPad">
-        <activity android:name=".MainActivity" android:exported="true">
+        android:label="SoundPad"
+        android:resizeableActivity="true"
+        android:supportsRtl="true">
+        <provider android:name="rikka.shizuku.ShizukuProvider" android:authorities="${applicationId}.shizuku" android:multiprocess="false" android:enabled="true" android:exported="true" android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+        <service android:name=".FloatingSoundboardService" android:exported="false" />
+        <activity android:name=".BrowserActivity" android:exported="false" android:resizeableActivity="true" />
+        <activity android:name=".AppLauncherActivity" android:exported="false" android:resizeableActivity="true" />
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:resizeableActivity="true"
+            android:launchMode="standard"
+            android:configChanges="screenSize|smallestScreenSize|orientation|screenLayout">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
