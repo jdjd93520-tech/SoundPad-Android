@@ -2,7 +2,12 @@ package com.alxt.SoundPad;
 
 import android.app.Activity;
 import android.app.ActivityOptions;
+import android.app.AlarmManager;
+import android.app.PendingIntent;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
@@ -10,6 +15,7 @@ import android.graphics.Rect;
 import android.os.Bundle;
 import android.text.Editable;
 import android.text.TextWatcher;
+import android.util.DisplayMetrics;
 import android.view.View;
 import android.widget.Button;
 import android.widget.CheckBox;
@@ -17,22 +23,22 @@ import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
-import android.util.DisplayMetrics;
 import android.widget.Toast;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import rikka.shizuku.Shizuku;
 
 public class AppLauncherActivity extends Activity {
+    static final String PREFS = "display_override";
+    static final String KEY_ACTIVE = "stretched_active";
+    static final String KEY_ORIGINAL = "original_override";
+    static final String KEY_PENDING_RESTORE = "pending_restore";
+    static final String KEY_DEADLINE = "restore_deadline";
     private static final int SHIZUKU_REQUEST = 7712;
-    private static final String PREFS = "display_override";
-    private static final String KEY_ACTIVE = "stretched_active";
-    private static final String KEY_ORIGINAL = "original_override";
     private EditText search, widthField, heightField;
     private LinearLayout appList;
     private CheckBox stretchedToggle;
@@ -40,6 +46,11 @@ public class AppLauncherActivity extends Activity {
     private final ArrayList<ApplicationInfo> apps = new ArrayList<>();
     private int widthDp, heightDp;
     private boolean pendingEnable;
+    private final BroadcastReceiver screenOffReceiver = new BroadcastReceiver() {
+        @Override public void onReceive(Context context, Intent intent) {
+            if (Intent.ACTION_SCREEN_OFF.equals(intent.getAction())) restoreDisplay("Screen turned off; original display restored.");
+        }
+    };
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
@@ -51,7 +62,7 @@ public class AppLauncherActivity extends Activity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(16, 12, 16, 12);
         TextView title = new TextView(this);
-        title.setText("Open another app in a freeform window");
+        title.setText("SoundPad Display Launcher");
         title.setTextSize(21);
         root.addView(title);
 
@@ -77,8 +88,7 @@ public class AppLauncherActivity extends Activity {
         root.addView(dimensions);
 
         stretchedToggle = new CheckBox(this);
-        stretchedToggle.setText("Apply stretched aspect ratio system-wide (all apps)");
-        stretchedToggle.setChecked(getPreferencesStore().getBoolean(KEY_ACTIVE, false));
+        stretchedToggle.setText("Stretch the entire phone display");
         root.addView(stretchedToggle);
 
         LinearLayout presets = new LinearLayout(this);
@@ -89,11 +99,15 @@ public class AppLauncherActivity extends Activity {
         root.addView(presets);
 
         TextView note = new TextView(this);
-        note.setText("Window width/height set the freeform launch bounds. The toggle separately changes Android's logical display resolution for the whole device using Shizuku, so the selected aspect ratio also applies to PUBG Mobile and other apps. Android/OEM scaling may letterbox or crop instead of physically stretching; some games may enforce their own display mode. Turn the toggle off to restore the previous display override.");
+        note.setText("The display override affects the whole phone. It automatically restores after 10 minutes, when the screen turns off, or after reboot when Shizuku is available. Android may letterbox or crop rather than physically stretch.");
         root.addView(note);
         displayStatus = new TextView(this);
-        displayStatus.setText(stretchedToggle.isChecked() ? "Stretched display override is marked on." : "System display unchanged.");
         root.addView(displayStatus);
+
+        Button reset = new Button(this);
+        reset.setText("Restore original display now");
+        reset.setOnClickListener(v -> restoreDisplay("Original display restored."));
+        root.addView(reset);
 
         ScrollView scroll = new ScrollView(this);
         appList = new LinearLayout(this);
@@ -104,24 +118,35 @@ public class AppLauncherActivity extends Activity {
 
         stretchedToggle.setOnCheckedChangeListener((button, checked) -> {
             if (checked) enableStretchedDisplay();
-            else restoreDisplay();
+            else restoreDisplay("Original display restored.");
         });
-
         search.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) { renderApps(); }
             @Override public void afterTextChanged(Editable e) { }
         });
+
+        registerReceiver(screenOffReceiver, new IntentFilter(Intent.ACTION_SCREEN_OFF));
         loadApps();
-        if (stretchedToggle.isChecked()) {
-            displayStatus.setText("Stretched mode is saved as enabled. Reapply it if the device reset its display override.");
-            enableStretchedDisplay();
+        SharedPreferences p = prefs();
+        if (p.getBoolean(KEY_ACTIVE, false)) {
+            stretchedToggle.setChecked(true);
+            long deadline = p.getLong(KEY_DEADLINE, 0L);
+            if (deadline > 0 && System.currentTimeMillis() >= deadline) restoreDisplay("Safety timeout expired; original display restored.");
+            else displayStatus.setText("Stretch is active. Automatic restore is scheduled.");
+        } else if (p.getBoolean(KEY_PENDING_RESTORE, false)) {
+            restoreDisplay("Finishing pending display recovery.");
+        } else {
+            displayStatus.setText("Display unchanged.");
         }
     }
 
-    private SharedPreferences getPreferencesStore() {
-        return getSharedPreferences(PREFS, MODE_PRIVATE);
+    @Override protected void onDestroy() {
+        try { unregisterReceiver(screenOffReceiver); } catch (Exception ignored) { }
+        super.onDestroy();
     }
+
+    private SharedPreferences prefs() { return getSharedPreferences(PREFS, MODE_PRIVATE); }
 
     private Button preset(String label, int ratioW, int ratioH) {
         Button b = new Button(this);
@@ -130,7 +155,6 @@ public class AppLauncherActivity extends Activity {
         b.setOnClickListener(v -> {
             int w = parse(widthField, widthDp);
             heightField.setText(String.valueOf(Math.max(1, w * ratioH / ratioW)));
-            if (stretchedToggle.isChecked()) enableStretchedDisplay();
         });
         return b;
     }
@@ -176,30 +200,26 @@ public class AppLauncherActivity extends Activity {
         try {
             Intent launch = getPackageManager().getLaunchIntentForPackage(info.packageName);
             if (launch == null) throw new IllegalStateException("This app has no launch activity");
-            int width = parse(widthField, widthDp);
-            int height = parse(heightField, heightDp);
             float density = getResources().getDisplayMetrics().density;
-            int w = (int)(width * density);
-            int h = (int)(height * density);
-            Rect bounds = new Rect(24, 72, 24 + w, 72 + h);
+            int w = (int)(parse(widthField, widthDp) * density);
+            int h = (int)(parse(heightField, heightDp) * density);
             ActivityOptions options = ActivityOptions.makeBasic();
-            options.setLaunchBounds(bounds);
+            options.setLaunchBounds(new Rect(24, 72, 24 + w, 72 + h));
             startActivity(launch, options.toBundle());
         } catch (Exception e) {
-            Toast.makeText(this, "Could not open app in freeform: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "Freeform launch unavailable: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
     }
 
     private void enableStretchedDisplay() {
         if (!Shizuku.pingBinder()) {
-            pendingEnable = false;
-            displayStatus.setText("Start Shizuku and connect its service, then turn this switch on again.");
+            displayStatus.setText("Start Shizuku and connect its service, then try again.");
             stretchedToggle.setChecked(false);
             return;
         }
         if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
             pendingEnable = true;
-            displayStatus.setText("Waiting for Shizuku permission. Approve the prompt, then return here.");
+            displayStatus.setText("Approve the Shizuku permission prompt.");
             Shizuku.requestPermission(SHIZUKU_REQUEST);
             return;
         }
@@ -207,11 +227,11 @@ public class AppLauncherActivity extends Activity {
         final double ratio = (double)parse(widthField, widthDp) / (double)parse(heightField, heightDp);
         new Thread(() -> {
             try {
+                SharedPreferences p = prefs();
                 String current = runPrivileged("wm size");
-                SharedPreferences prefs = getPreferencesStore();
-                if (!prefs.getBoolean(KEY_ACTIVE, false)) {
+                if (!p.getBoolean(KEY_ACTIVE, false)) {
                     Matcher m = Pattern.compile("Override size:\\s*(\\d+x\\d+)").matcher(current);
-                    prefs.edit().putString(KEY_ORIGINAL, m.find() ? m.group(1) : "").apply();
+                    p.edit().putString(KEY_ORIGINAL, m.find() ? m.group(1) : "").apply();
                 }
                 DisplayMetrics real = new DisplayMetrics();
                 getWindowManager().getDefaultDisplay().getRealMetrics(real);
@@ -225,8 +245,11 @@ public class AppLauncherActivity extends Activity {
                     targetW = Math.max(200, (int)Math.round(longEdge * ratio));
                 }
                 runPrivileged("wm size " + targetW + "x" + targetH);
-                prefs.edit().putBoolean(KEY_ACTIVE, true).apply();
-                runOnUiThread(() -> displayStatus.setText("System-wide logical display set to " + targetW + " × " + targetH + " px. This applies to all apps."));
+                long deadline = System.currentTimeMillis() + 10L * 60L * 1000L;
+                p.edit().putBoolean(KEY_ACTIVE, true).putBoolean(KEY_PENDING_RESTORE, false)
+                    .putLong(KEY_DEADLINE, deadline).apply();
+                scheduleRestore(this, deadline);
+                runOnUiThread(() -> displayStatus.setText("Whole-display override active: " + targetW + " × " + targetH + " px. Auto-restores within 10 minutes."));
             } catch (Exception e) {
                 runOnUiThread(() -> {
                     displayStatus.setText("Could not apply display override: " + e.getMessage());
@@ -236,44 +259,79 @@ public class AppLauncherActivity extends Activity {
         }, "SoundPad-display-override").start();
     }
 
-    private void restoreDisplay() {
-        SharedPreferences prefs = getPreferencesStore();
-        if (!prefs.getBoolean(KEY_ACTIVE, false)) {
-            displayStatus.setText("System display unchanged.");
+    private void restoreDisplay(String message) {
+        SharedPreferences p = prefs();
+        if (!p.getBoolean(KEY_ACTIVE, false) && !p.getBoolean(KEY_PENDING_RESTORE, false)) {
+            displayStatus.setText("Display unchanged.");
+            stretchedToggle.setChecked(false);
             return;
         }
         if (!Shizuku.pingBinder() || Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
-            displayStatus.setText("Shizuku permission is needed to restore the previous display setting. Reconnect Shizuku and turn the switch off again.");
-            stretchedToggle.setChecked(true);
+            p.edit().putBoolean(KEY_PENDING_RESTORE, true).apply();
+            displayStatus.setText("Restore is pending. Reconnect Shizuku and open SoundPad to finish recovery.");
+            if (stretchedToggle.isChecked()) stretchedToggle.setChecked(false);
             return;
         }
         new Thread(() -> {
             try {
-                String original = prefs.getString(KEY_ORIGINAL, "");
-                if (original == null || original.isEmpty()) runPrivileged("wm size reset");
-                else runPrivileged("wm size " + original);
-                prefs.edit().putBoolean(KEY_ACTIVE, false).remove(KEY_ORIGINAL).apply();
-                runOnUiThread(() -> displayStatus.setText("Previous display resolution override restored."));
-            } catch (Exception e) {
+                restoreWithShizuku(this);
                 runOnUiThread(() -> {
-                    displayStatus.setText("Restore failed: " + e.getMessage());
-                    stretchedToggle.setChecked(true);
+                    displayStatus.setText(message);
+                    stretchedToggle.setChecked(false);
                 });
+            } catch (Exception e) {
+                p.edit().putBoolean(KEY_PENDING_RESTORE, true).apply();
+                runOnUiThread(() -> displayStatus.setText("Restore failed; reconnect Shizuku and press Restore: " + e.getMessage()));
             }
         }, "SoundPad-display-restore").start();
     }
 
-    private String runPrivileged(String command) throws Exception {
+    static void scheduleRestore(Context context, long deadline) {
+        AlarmManager am = (AlarmManager)context.getSystemService(ALARM_SERVICE);
+        PendingIntent pi = restorePendingIntent(context);
+        am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, deadline, pi);
+    }
+
+    static PendingIntent restorePendingIntent(Context context) {
+        Intent i = new Intent(context, DisplayRecoveryReceiver.class).setAction(DisplayRecoveryReceiver.ACTION_TIMEOUT);
+        return PendingIntent.getBroadcast(context, 7713, i, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+    }
+
+    static void restoreWithShizuku(Context context) throws Exception {
+        SharedPreferences p = context.getSharedPreferences(PREFS, MODE_PRIVATE);
+        String original = p.getString(KEY_ORIGINAL, "");
+        if (original == null || original.isEmpty()) runPrivilegedStatic("wm size reset");
+        else runPrivilegedStatic("wm size " + original);
+        p.edit().putBoolean(KEY_ACTIVE, false).putBoolean(KEY_PENDING_RESTORE, false)
+            .remove(KEY_ORIGINAL).remove(KEY_DEADLINE).apply();
+        AlarmManager am = (AlarmManager)context.getSystemService(ALARM_SERVICE);
+        am.cancel(restorePendingIntent(context));
+    }
+
+    static void runPrivilegedStatic(String command) throws Exception {
         Method method = Shizuku.class.getDeclaredMethod("newProcess", String[].class, String[].class, String.class);
         method.setAccessible(true);
-        Process process = (Process) method.invoke(null, new String[]{"sh", "-c", command}, null, null);
+        Process process = (Process)method.invoke(null, new String[]{"sh", "-c", command}, null, null);
         StringBuilder output = new StringBuilder();
         try (java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(process.getInputStream()))) {
             String line;
             while ((line = reader.readLine()) != null) output.append(line).append('\n');
         }
         int exit = process.waitFor();
-        if (exit != 0) throw new IllegalStateException("Shell command failed (" + exit + "): " + command);
+        if (exit != 0) throw new IllegalStateException("Shell command failed (" + exit + "): " + output);
+    }
+
+    private String runPrivileged(String command) throws Exception {
+        Method method = Shizuku.class.getDeclaredMethod("newProcess", String[].class, String[].class, String.class);
+        method.setAccessible(true);
+        Process process = (Process)method.invoke(null, new String[]{"sh", "-c", command}, null, null);
+        StringBuilder output = new StringBuilder();
+        try (java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(process.getInputStream()))) {
+            String line;
+            while ((line = reader.readLine()) != null) output.append(line).append('\n');
+        }
+        int exit = process.waitFor();
+        if (exit != 0) throw new IllegalStateException("Shell command failed (" + exit + "): " + output);
         return output.toString();
     }
 
