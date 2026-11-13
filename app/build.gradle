@@ -10,17 +10,15 @@ android {
     compileSdk 35
 
     defaultConfig {
-        applicationId 'com.alxt.SoundPad'
+        applicationId 'com.soundpad.pubgstretch'
         minSdk 29
         targetSdk 35
-        versionCode 8
-        versionName '2.6'
+        versionCode 1
+        versionName '1.0'
     }
 
     buildTypes {
         release {
-            // Installable release-variant build; uses the standard debug key for this test build.
-            // Replace with a private release keystore before publishing to an app store.
             signingConfig signingConfigs.debug
             minifyEnabled false
         }
