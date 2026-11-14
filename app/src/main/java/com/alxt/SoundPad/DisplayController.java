@@ -16,26 +16,9 @@ final class DisplayController {
     private static final String KEY_SIZE = "original_size";
     private static final String KEY_DENSITY = "original_density";
     private static final String KEY_SCALING = "original_scaling";
-    private static final String[] ALLOWED_RESOLUTIONS = {"700x1360", "900x1600", "540x1080", "200x1600", "100x1080"};
+    private static final String[] ALLOWED_RESOLUTIONS = {"700x1360", "900x1600", "540x1080", "720x1360"};
 
     private DisplayController() {}
-
-    static synchronized void applyMode(Context context, String mode, String resolution) throws Exception {
-        requirePermission();
-        SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        if ("center".equals(mode)) {
-            if (!prefs.getBoolean(KEY_ACTIVE, false)) {
-                throw new IllegalStateException("There are no saved display settings to restore. Apply a resolution first.");
-            }
-            restoreSavedConfiguration(prefs);
-            prefs.edit().putBoolean(KEY_ACTIVE, false).commit();
-            RestoreScheduler.cancel(context);
-            return;
-        }
-        validateResolution(resolution);
-        saveOriginalIfNeeded(context, prefs);
-        applyResolutionSafely(context, prefs, resolution, 10 * 60 * 1000L);
-    }
 
     static synchronized void previewResolution(Context context, String resolution) throws Exception {
         previewResolution(context, resolution, 20 * 1000L);
@@ -87,18 +70,11 @@ final class DisplayController {
 
     private static void applyResolutionSafely(Context context, SharedPreferences prefs,
             String resolution, long restoreDelayMillis) throws Exception {
+        // Schedule the automatic rollback before changing the display.
         RestoreScheduler.schedule(context, restoreDelayMillis);
-        boolean narrowPreset = "200x1600".equals(resolution) || "100x1080".equals(resolution);
         try {
-            if (narrowPreset) run("wm scaling auto");
             run("wm size " + resolution);
             verifyResolution(resolution);
-            if (narrowPreset) {
-                String scaling = readScaling(run("settings get global display_scaling_force"));
-                if (!"auto".equals(scaling)) {
-                    throw new IllegalStateException("Android did not confirm automatic display scaling.");
-                }
-            }
         } catch (Exception applyError) {
             try {
                 restoreSavedConfiguration(prefs);
@@ -106,6 +82,7 @@ final class DisplayController {
                 RestoreScheduler.cancel(context);
             } catch (Exception restoreError) {
                 applyError.addSuppressed(restoreError);
+                // Keep a short retry scheduled if immediate rollback fails.
                 RestoreScheduler.schedule(context, 60 * 1000L);
             }
             throw applyError;
