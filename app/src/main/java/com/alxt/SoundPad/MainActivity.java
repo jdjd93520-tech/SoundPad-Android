@@ -142,6 +142,10 @@ public class MainActivity extends Activity {
         forceLp.topMargin = dp(10);
         root.addView(forceLandscapeButton, forceLp);
         forceLandscapeButton.setOnClickListener(v -> forceLandscapeNow());
+        Button guideButton = actionButton("TOUCH & FULL-SCREEN GUIDE", Color.rgb(48, 62, 84), fg);
+        LinearLayout.LayoutParams guideLp = params(-1, dp(50)); guideLp.topMargin = dp(10);
+        root.addView(guideButton, guideLp);
+        guideButton.setOnClickListener(v -> showDisplayGuide());
         restoreButton = actionButton("RESTORE ORIGINAL DISPLAY", Color.rgb(48, 62, 84), fg);
         LinearLayout.LayoutParams restoreLp = params(-1, dp(54)); restoreLp.topMargin = dp(10);
         root.addView(restoreButton, restoreLp);
@@ -149,7 +153,7 @@ public class MainActivity extends Activity {
         TextView safety = label("The selected resolution is temporary and automatically restores after the preview. Keep Shizuku running so the restore can complete. If the display or touch layout looks wrong, use RESTORE ORIGINAL DISPLAY or wait for the timer.", 12, muted, false);
         LinearLayout.LayoutParams safetyLp = params(-1, -2); safetyLp.topMargin = dp(20);
         root.addView(safety, safetyLp);
-        TextView note = label("Choices are generated from this phone's detected physical display dimensions, so the list adapts when you move the app to another Android device. Android Auto scaling is enabled. This changes Android's logical display size; it cannot force a hardware-level stretch on every manufacturer's firmware, and individual apps may still keep their own aspect ratio.", 12, muted, false);
+        TextView note = label("Resolution values are sent in Android's natural portrait order (short side x long side), then the display is rotated to landscape. The app keeps your original DPI unchanged to avoid unnecessary UI and touch-size changes. Android still controls touch mapping; some OEMs or apps may handle custom sizes differently.", 12, muted, false);
         LinearLayout.LayoutParams noteLp = params(-1, -2); noteLp.topMargin = dp(12);
         root.addView(note, noteLp);
         setContentView(scroll);
@@ -260,6 +264,26 @@ public class MainActivity extends Activity {
         }).start();
     }
 
+    private void showDisplayGuide() {
+        new AlertDialog.Builder(this)
+                .setTitle("Touch & full-screen guide")
+                .setMessage(
+                        "ANDROID GAMES\n" +
+                        "1. Choose a landscape ratio. The app sends the size in natural portrait order (short side x long side), then locks landscape.\n" +
+                        "2. Open Android Settings and look for Display > Full-screen apps, App aspect ratio, or Camera cutout. If your phone offers a per-app full-screen option, enable it for the app you want. Menu names vary by brand; this app does not change hidden OEM settings.\n" +
+                        "3. Keep the original DPI. Android normally maps touch using its display configuration, but some games or manufacturer builds may not handle custom sizes correctly. Test the corners and buttons before using a long preview. Restore immediately if touch is offset.\n" +
+                        "4. If reverse landscape behaves differently, rotate the phone 180 degrees and test again. This is only a compatibility check, not a guaranteed fix.\n\n" +
+                        "MOONLIGHT / PC STREAMING\n" +
+                        "For streamed PC games, set the host PC to the desired aspect ratio and use Moonlight's own Stretch video to full screen option if available. This app cannot change the host resolution or Moonlight's touch translation.\n\n" +
+                        "GAME DEVELOPMENT\n" +
+                        "For apps you develop, render the game view to a RenderTexture and stretch that view to the display while keeping touch/UI controls in a separate screen-space layer. This is an app-development technique, not a system setting.\n\n" +
+                        "IMPORTANT\n" +
+                        "Standard Android resolution commands cannot guarantee non-uniform GPU stretching or remove bars from every app. If an app enforces its own aspect ratio, Android may still letterbox it."
+                )
+                .setPositiveButton("OK", null)
+                .show();
+    }
+
     private String[] buildResolutionOptions() {
         DisplayMetrics metrics = new DisplayMetrics();
         getWindowManager().getDefaultDisplay().getRealMetrics(metrics);
@@ -271,18 +295,23 @@ public class MainActivity extends Activity {
         }
         LinkedHashSet<String> options = new LinkedHashSet<>();
         double[] ratios = {4.0 / 3.0, 16.0 / 9.0, 18.0 / 9.0, 19.5 / 9.0, 20.0 / 9.0};
-        for (double ratio : ratios) {
-            int width = Math.min(longEdge, (int) Math.round(shortEdge * ratio));
-            if (width >= shortEdge) options.add(width + "x" + shortEdge);
+        String[] names = {"4:3", "16:9", "18:9", "19.5:9", "20:9"};
+        for (int i = 0; i < ratios.length; i++) {
+            int logicalHeight = (int) Math.round(shortEdge * ratios[i]);
+            if (logicalHeight <= longEdge) {
+                options.add("Landscape " + names[i] + " — " + shortEdge + "x" + logicalHeight);
+            }
         }
-        options.add(longEdge + "x" + shortEdge);
+        options.add("Native aspect — " + shortEdge + "x" + longEdge);
         return options.toArray(new String[0]);
     }
 
     private String selectedResolution() {
         Object selected = resolutionSpinner == null ? null : resolutionSpinner.getSelectedItem();
         if (selected == null) throw new IllegalStateException("Choose a resolution first.");
-        return selected.toString();
+        String value = selected.toString();
+        int separator = value.lastIndexOf("—");
+        return (separator >= 0 ? value.substring(separator + 1) : value).trim();
     }
 
     private void setActionsEnabled(boolean enabled) {
