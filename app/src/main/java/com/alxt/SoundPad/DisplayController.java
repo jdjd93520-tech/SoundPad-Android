@@ -24,17 +24,16 @@ final class DisplayController {
         if (!prefs.getBoolean(KEY_ACTIVE, false)) {
             String size = readSizeOverride(run("wm size"));
             String density = readDensityOverride(run("wm density"));
-            String scaling = readScaling(run("wm scaling"));
+            String scaling = readScaling(run("settings get global display_scaling_force"));
             boolean saved = prefs.edit().putString(KEY_SIZE, size).putString(KEY_DENSITY, density)
                     .putString(KEY_SCALING, scaling).putBoolean(KEY_ACTIVE, true).commit();
             if (!saved) throw new IllegalStateException("Could not save the original display settings.");
         }
-        // Arm recovery before changing the display, so a failed or interrupted apply still has a restore path.
         RestoreScheduler.schedule(context);
 
         String requested = "center".equals(mode) ? "off" : "auto";
         run("wm scaling " + requested);
-        String actual = readScaling(run("wm scaling"));
+        String actual = readScaling(run("settings get global display_scaling_force"));
         if (!requested.equals(actual)) {
             throw new IllegalStateException("Android did not confirm scaling mode '" + requested + "'. Reported: " + actual);
         }
@@ -56,7 +55,7 @@ final class DisplayController {
 
         String actualSize = readSizeOverride(run("wm size"));
         String actualDensity = readDensityOverride(run("wm density"));
-        String actualScaling = readScaling(run("wm scaling"));
+        String actualScaling = readScaling(run("settings get global display_scaling_force"));
         if (!size.equals(actualSize) || !density.equals(actualDensity) || !scaling.equals(actualScaling)) {
             throw new IllegalStateException("Restore verification failed. Current: size=" + actualSize
                     + ", density=" + actualDensity + ", scaling=" + actualScaling);
@@ -68,7 +67,7 @@ final class DisplayController {
     static String readDisplaySummary() throws Exception {
         String sizeOut = run("wm size");
         String densityOut = run("wm density");
-        String scalingOut = run("wm scaling");
+        String scalingOut = run("settings get global display_scaling_force");
         return "Resolution: " + readCurrentSize(sizeOut) + "\nDensity: "
                 + readCurrentDensity(densityOut) + " dpi\nScaling: " + readScaling(scalingOut);
     }
@@ -135,9 +134,9 @@ final class DisplayController {
     }
 
     private static String readScaling(String output) {
-        String lower = output.toLowerCase();
-        if (lower.contains("off")) return "off";
-        if (lower.contains("auto")) return "auto";
-        throw new IllegalStateException("Could not understand Android scaling status: " + output);
+        String value = output.trim();
+        if ("0".equals(value) || "null".equalsIgnoreCase(value) || value.isEmpty()) return "auto";
+        if ("1".equals(value)) return "off";
+        throw new IllegalStateException("Could not understand Android display scaling setting: " + value);
     }
 }
