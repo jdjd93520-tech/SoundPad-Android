@@ -11,10 +11,14 @@ final class RestoreScheduler {
     private RestoreScheduler() {}
 
     static void schedule(Context context) {
+        schedule(context, 10 * 60 * 1000L);
+    }
+
+    static void schedule(Context context, long delayMillis) {
         AlarmManager alarms = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
-        if (alarms == null) return;
+        if (alarms == null) throw new IllegalStateException("Android alarm service is unavailable.");
         alarms.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                SystemClock.elapsedRealtime() + 10 * 60 * 1000L, pendingIntent(context));
+                SystemClock.elapsedRealtime() + delayMillis, pendingIntent(context));
     }
 
     static void cancel(Context context) {
