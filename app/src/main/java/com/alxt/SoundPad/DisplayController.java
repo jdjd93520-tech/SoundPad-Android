@@ -31,17 +31,36 @@ final class DisplayController {
             if (!saved) throw new IllegalStateException("Could not save the original display settings.");
         }
         RestoreScheduler.schedule(context);
-        String requested = "center".equals(mode) ? "off" : "auto";
-        run("wm scaling " + requested);
-        String actual = readScaling(run("settings get global display_scaling_force"));
-        if (!requested.equals(actual)) {
-            throw new IllegalStateException("Android did not confirm scaling mode '" + requested + "'. Reported: " + actual);
+
+        if ("center".equals(mode)) {
+            // Android has no universal command for GPU-style centered, unscaled output.
+            // The safe native fallback is to return to the user's saved display configuration.
+            restoreSavedConfiguration(prefs);
+            return;
+        }
+
+        String physical = readPhysicalSize(run("wm size"));
+        String target = landscapeSixteenNineLogicalSize(physical);
+        run("wm size " + target);
+        String actual = readSizeOverride(run("wm size"));
+        if (!target.equals(actual)) {
+            throw new IllegalStateException("Android did not confirm the 16:9 logical resolution. Requested: "
+                    + target + ", reported: " + actual);
         }
     }
 
     static synchronized void restoreOriginal(Context context) throws Exception {
         requirePermission();
         SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        if (!prefs.getBoolean(KEY_ACTIVE, false)) {
+            throw new IllegalStateException("No saved original display settings were found.");
+        }
+        restoreSavedConfiguration(prefs);
+        prefs.edit().putBoolean(KEY_ACTIVE, false).remove("last_restore_error").commit();
+        RestoreScheduler.cancel(context);
+    }
+
+    private static void restoreSavedConfiguration(SharedPreferences prefs) throws Exception {
         String size = prefs.getString(KEY_SIZE, null);
         String density = prefs.getString(KEY_DENSITY, null);
         String scaling = prefs.getString(KEY_SCALING, null);
@@ -58,8 +77,6 @@ final class DisplayController {
             throw new IllegalStateException("Restore verification failed. Current: size=" + actualSize
                     + ", density=" + actualDensity + ", scaling=" + actualScaling);
         }
-        prefs.edit().putBoolean(KEY_ACTIVE, false).remove("last_restore_error").commit();
-        RestoreScheduler.cancel(context);
     }
 
     static String readDisplaySummary() throws Exception {
@@ -67,7 +84,7 @@ final class DisplayController {
         String densityOut = run("wm density");
         String scalingOut = run("settings get global display_scaling_force");
         return "Resolution: " + readCurrentSize(sizeOut) + "\nDensity: "
-                + readCurrentDensity(densityOut) + " dpi\nScaling: " + readScaling(scalingOut);
+                + readCurrentDensity(densityOut) + " dpi\nScaling policy: " + readScaling(scalingOut);
     }
 
     static boolean isRestorePending(Context context) {
@@ -81,7 +98,6 @@ final class DisplayController {
         }
     }
 
-    // Shizuku 13.1.5 exposes newProcess as a private helper; invoke that helper reflectively.
     private static Process createShellProcess(String[] command) throws Exception {
         Method method = Shizuku.class.getDeclaredMethod("newProcess",
                 String[].class, String[].class, String.class);
@@ -107,6 +123,22 @@ final class DisplayController {
         String result = output.toString().trim();
         if (code != 0) throw new IllegalStateException(command + " failed: " + result);
         return result;
+    }
+
+    private static String landscapeSixteenNineLogicalSize(String physicalSize) {
+        Matcher matcher = Pattern.compile("^(\\d+)x(\\d+)$").matcher(physicalSize);
+        if (!matcher.matches()) throw new IllegalStateException("Could not read physical display resolution: " + physicalSize);
+        int width = Integer.parseInt(matcher.group(1));
+        int height = Integer.parseInt(matcher.group(2));
+        int shortSide = Math.min(width, height);
+        int longSide = ((shortSide * 16 / 9) + 1) & ~1;
+        return width <= height ? shortSide + "x" + longSide : longSide + "x" + shortSide;
+    }
+
+    private static String readPhysicalSize(String output) {
+        Matcher m = Pattern.compile("(?m)^Physical size: (\\d+x\\d+)\\s*$").matcher(output);
+        if (!m.find()) throw new IllegalStateException("Android did not report the panel's physical resolution: " + output);
+        return m.group(1);
     }
 
     private static void restoreSize(String value) throws Exception {
