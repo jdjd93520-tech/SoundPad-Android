@@ -131,7 +131,7 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams stretchLp = params(-1, dp(58));
         stretchLp.topMargin = dp(14);
         root.addView(applyButton, stretchLp);
-        applyButton.setOnClickListener(v -> previewSelectedResolution(30 * 60 * 1000L, "30 minutes"));
+        applyButton.setOnClickListener(v -> { String selected = selectedResolution(); if ("200x1080".equals(selected)) previewSelectedResolution(20 * 1000L, "20 seconds (experimental safety preview)"); else previewSelectedResolution(30 * 60 * 1000L, "30 minutes"); });
         previewButton = actionButton("QUICK PREVIEW (20 SEC)", Color.rgb(48, 62, 84), fg);
         LinearLayout.LayoutParams previewLp = params(-1, dp(54));
         previewLp.topMargin = dp(10);
@@ -150,7 +150,7 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams restoreLp = params(-1, dp(54)); restoreLp.topMargin = dp(10);
         root.addView(restoreButton, restoreLp);
         restoreButton.setOnClickListener(v -> confirmRestore());
-        TextView safety = label("The selected resolution is temporary and automatically restores after the preview. Keep Shizuku running so the restore can complete. If the display or touch layout looks wrong, use RESTORE ORIGINAL DISPLAY or wait for the timer.", 12, muted, false);
+        TextView safety = label("The selected resolution is temporary and automatically restores after the preview. The experimental 200x1080 preset is limited to a 20-second safety preview. Keep Shizuku running so the restore can complete. If the display or touch layout looks wrong, use RESTORE ORIGINAL DISPLAY or wait for the timer.", 12, muted, false);
         LinearLayout.LayoutParams safetyLp = params(-1, -2); safetyLp.topMargin = dp(20);
         root.addView(safety, safetyLp);
         TextView note = label("Resolution values are sent in Android's device natural-orientation order, then the display is rotated to landscape. The app keeps your original DPI unchanged to avoid unnecessary UI and touch-size changes. Android still controls touch mapping; some OEMs or apps may handle custom sizes differently.", 12, muted, false);
@@ -311,6 +311,8 @@ public class MainActivity extends Activity {
                 options.add("Landscape " + names[i] + " — " + logicalWidth + "x" + logicalHeight);
             }
         }
+        if (naturalPortrait) options.add("Experimental 200x1080 — 200x1080");
+        else options.add("Experimental 200x1080 — 1080x200");
         options.add("Native aspect — " + naturalWidth + "x" + naturalHeight);
         return options.toArray(new String[0]);
     }
