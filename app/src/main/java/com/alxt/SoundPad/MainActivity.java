@@ -21,7 +21,7 @@ public class MainActivity extends Activity {
     private static final String[] RESOLUTIONS = {"700x1360", "900x1600", "540x1080", "200x1600", "100x1080"};
     private String selectedMode = "stretched";
     private TextView statusText, displayText, modeDescription;
-    private Button stretchedButton, centerButton, applyButton, previewButton;
+    private Button stretchedButton, centerButton, applyButton, previewButton, preview30Button;
     private Spinner resolutionSpinner;
     private boolean permissionListenerRegistered;
     private boolean permissionRequestAttemptedThisSession;
@@ -171,7 +171,14 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams applyLp = new LinearLayout.LayoutParams(0, -1, 1);
         applyLp.leftMargin = dp(5);
         actions.addView(applyButton, applyLp);
-        previewButton.setOnClickListener(v -> previewSelectedResolution());
+        previewButton.setOnClickListener(v -> previewSelectedResolution(20 * 1000L, "20 seconds"));
+
+        preview30Button = actionButton("PREVIEW 30 MIN", Color.rgb(48, 62, 84), fg);
+        LinearLayout.LayoutParams preview30Lp = params(-1, dp(54));
+        preview30Lp.topMargin = dp(10);
+        root.addView(preview30Button, preview30Lp);
+        preview30Button.setOnClickListener(v -> previewSelectedResolution(30 * 60 * 1000L, "30 minutes"));
+
         applyButton.setOnClickListener(v -> confirmApply());
 
         Button restore = actionButton("RESTORE ORIGINAL DISPLAY", Color.rgb(48, 62, 84), fg);
@@ -179,11 +186,11 @@ public class MainActivity extends Activity {
         root.addView(restore, restoreLp);
         restore.setOnClickListener(v -> confirmRestore());
 
-        TextView safety = label("PREVIEW applies the selected resolution temporarily for 20 seconds, then attempts to restore your saved settings automatically. APPLY keeps the selected resolution active and schedules a safety restore after 10 minutes. You can restore sooner with RESTORE ORIGINAL DISPLAY. Shizuku must remain available for automatic restore.", 12, muted, false);
+        TextView safety = label("PREVIEW 20 SEC and PREVIEW 30 MIN temporarily apply the selected resolution, then attempt to restore your saved settings automatically. APPLY keeps the selected resolution active and schedules a safety restore after 10 minutes. You can restore sooner with RESTORE ORIGINAL DISPLAY. Shizuku must remain available for automatic restore.", 12, muted, false);
         LinearLayout.LayoutParams safetyLp = params(-1, -2); safetyLp.topMargin = dp(20);
         root.addView(safety, safetyLp);
 
-        TextView note = label("The three presets are logical display sizes. Android normally remaps touch coordinates when the display size changes, but some apps or device firmware may handle scaling differently. This app cannot guarantee identical touch behavior on every Motorola model or force the panel's hardware scaler to stretch instead of letterbox.", 12, muted, false);
+        TextView note = label("The five presets are logical display sizes. Android normally remaps touch coordinates when the display size changes, but some apps or device firmware may handle scaling differently. This app cannot guarantee identical touch behavior on every Motorola model or force the panel's hardware scaler to stretch instead of letterbox.", 12, muted, false);
         LinearLayout.LayoutParams noteLp = params(-1, -2); noteLp.topMargin = dp(12);
         root.addView(note, noteLp);
         setContentView(scroll);
@@ -196,6 +203,7 @@ public class MainActivity extends Activity {
         centerButton.setBackgroundColor(stretched ? Color.rgb(40, 52, 72) : Color.rgb(48, 113, 211));
         if (resolutionSpinner != null) resolutionSpinner.setEnabled(stretched);
         if (previewButton != null) previewButton.setEnabled(stretched);
+        if (preview30Button != null) preview30Button.setEnabled(stretched);
         modeDescription.setText(stretched
                 ? "STRETCHED applies the selected logical resolution. Choose one of the presets below, preview it briefly, or apply it for up to 10 minutes before the safety restore."
                 : "CENTER / NATIVE restores the saved original resolution, DPI, and scaling settings. Android does not provide a universal system-wide GPU-style centered mode.");
@@ -209,30 +217,32 @@ public class MainActivity extends Activity {
     private void setActionsEnabled(boolean enabled) {
         applyButton.setEnabled(enabled);
         previewButton.setEnabled(enabled);
+        preview30Button.setEnabled(enabled && "stretched".equals(selectedMode));
         resolutionSpinner.setEnabled(enabled && "stretched".equals(selectedMode));
     }
 
-    private void previewSelectedResolution() {
+    private void previewSelectedResolution(long durationMillis, String durationLabel) {
         if (!"stretched".equals(selectedMode)) {
             setStatus("Select STRETCHED mode to preview a resolution.");
             return;
         }
         if (!hasShizukuPermission()) return;
         final String resolution = selectedResolution();
-        new AlertDialog.Builder(this).setTitle("Preview " + resolution + "?")
-                .setMessage("This temporarily changes the logical display resolution for 20 seconds, then attempts to restore your saved original settings. If the picture or touch layout looks wrong, wait for the automatic restore.")
+        new AlertDialog.Builder(this).setTitle("Preview " + resolution + " for " + durationLabel + "?")
+                .setMessage("This temporarily changes the logical display resolution for " + durationLabel
+                        + ", then attempts to restore your saved original settings. For a 30-minute preview, keep Shizuku running and available. If the picture or touch layout looks wrong, use RESTORE ORIGINAL DISPLAY or wait for the automatic restore.")
                 .setNegativeButton("CANCEL", null)
-                .setPositiveButton("PREVIEW", (d, w) -> runPreview(resolution)).show();
+                .setPositiveButton("PREVIEW", (d, w) -> runPreview(resolution, durationMillis, durationLabel)).show();
     }
 
-    private void runPreview(String resolution) {
+    private void runPreview(String resolution, long durationMillis, String durationLabel) {
         setActionsEnabled(false);
         new Thread(() -> {
             try {
-                DisplayController.previewResolution(this, resolution);
+                DisplayController.previewResolution(this, resolution, durationMillis);
                 runOnUiThread(() -> {
                     setActionsEnabled(true);
-                    setStatus("Previewing " + resolution + ". Automatic restore is scheduled in 20 seconds.");
+                    setStatus("Previewing " + resolution + ". Automatic restore is scheduled in " + durationLabel + ".");
                     refreshStatus();
                 });
             } catch (Exception e) {
