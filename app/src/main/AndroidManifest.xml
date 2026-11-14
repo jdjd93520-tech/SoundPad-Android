@@ -13,10 +13,8 @@
             </intent-filter>
         </activity>
         <receiver android:name=".RestoreReceiver" android:enabled="true" android:exported="true">
-            <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /></intent-filter>
-        </receiver>
-        <receiver android:name=".RestoreReceiver" android:enabled="true" android:exported="false">
             <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.SCREEN_OFF" />
                 <action android:name="com.jdjd.displaylauncher.ACTION_TIMEOUT" />
             </intent-filter>
