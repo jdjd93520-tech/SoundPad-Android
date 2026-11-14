@@ -9,6 +9,7 @@ import android.os.Bundle;
 import android.view.View;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Spinner;
@@ -18,7 +19,7 @@ import rikka.shizuku.Shizuku;
 
 public class MainActivity extends Activity {
     private static final int REQUEST_SHIZUKU = 42;
-    private static final String[] RESOLUTIONS = {"720x1360", "700x1360", "900x1600", "540x1080", "1024x768", "900x720", "960x720", "1080x720", "1280x800", "480x1280", "540x1200", "600x1280", "640x1440", "700x1500", "720x1600"};
+    private static final String[] IPAD_4_3 = {"800x600", "960x720", "1024x768", "1280x960", "1440x1080", "1600x1200", "1920x1440"};\n    private static final String[] CLASSIC_5_4 = {"800x640", "1000x800", "1280x1024", "1600x1280"};\n    private static final String[] DRONE_3_2 = {"1200x800", "1440x960", "1620x1080", "1920x1280"};\n    private static final String[] WIDE_16_10 = {"1280x800", "1600x1000"};\n    private static final String[] RESOLUTIONS = IPAD_4_3;
     private String selectedMode = "stretched";
     private TextView statusText, displayText, modeDescription;
     private Button stretchedButton, centerButton, previewButton, preview30Button, forceLandscapeButton;
@@ -163,6 +164,28 @@ public class MainActivity extends Activity {
         spinnerLp.topMargin = dp(8);
         root.addView(resolutionSpinner, spinnerLp);
 
+        LinearLayout ratioButtons = new LinearLayout(this);
+        ratioButtons.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams ratioLp = params(-1, dp(48)); ratioLp.topMargin = dp(8);
+        root.addView(ratioButtons, ratioLp);
+        addRatioButton(ratioButtons, "iPad 4:3", IPAD_4_3, true);
+        addRatioButton(ratioButtons, "5:4", CLASSIC_5_4, false);
+        addRatioButton(ratioButtons, "Drone 3:2", DRONE_3_2, false);
+        addRatioButton(ratioButtons, "16:10", WIDE_16_10, false);
+
+        pairPreviewCheck = new CheckBox(this);
+        pairPreviewCheck.setText("Enable manual A/B resolution toggle");
+        pairPreviewCheck.setTextColor(fg);
+        pairPreviewCheck.setButtonTintList(android.content.res.ColorStateList.valueOf(accent));
+        LinearLayout.LayoutParams pairLp = params(-1, -2); pairLp.topMargin = dp(8);
+        root.addView(pairPreviewCheck, pairLp);
+        toggleResolutionButton = actionButton("TOGGLE A / B RESOLUTION", Color.rgb(37, 118, 91), Color.WHITE);
+        LinearLayout.LayoutParams toggleLp = params(-1, dp(54)); toggleLp.topMargin = dp(8);
+        root.addView(toggleResolutionButton, toggleLp);
+        toggleResolutionButton.setEnabled(false);
+        pairPreviewCheck.setOnCheckedChangeListener((button, checked) -> toggleResolutionButton.setEnabled(checked));
+        toggleResolutionButton.setOnClickListener(v -> toggleResolutionManually());
+
         previewButton = actionButton("PREVIEW 20 SEC", Color.rgb(48, 62, 84), fg);
         LinearLayout.LayoutParams previewLp = params(-1, dp(54));
         previewLp.topMargin = dp(14);
@@ -180,11 +203,11 @@ public class MainActivity extends Activity {
         root.addView(restore, restoreLp);
         restore.setOnClickListener(v -> confirmRestore());
 
-        TextView safety = label("PREVIEW 20 SEC and PREVIEW 30 MIN temporarily apply the selected resolution, then attempt to restore your saved settings automatically. There is no permanent apply option. You can restore sooner with RESTORE ORIGINAL DISPLAY. Keep Shizuku running and available for automatic restore.", 12, muted, false);
+        TextView safety = label("PREVIEW 20 SEC and PREVIEW 30 MIN temporarily apply the selected resolution, then attempt to restore your saved settings automatically. There is no permanent apply option. You can restore sooner with RESTORE ORIGINAL DISPLAY. A/B switching is manual only; rapid automatic flicker has been intentionally excluded. Keep Shizuku running and available for automatic restore.", 12, muted, false);
         LinearLayout.LayoutParams safetyLp = params(-1, -2); safetyLp.topMargin = dp(20);
         root.addView(safety, safetyLp);
 
-        TextView note = label("Portrait-shaped presets are logical portrait dimensions; the system rotation lock turns the display coordinate space to landscape. This does not force PUBG Mobile to keep a portrait-shaped game viewport or guarantee a slow-motion effect. STRETCHED asks Android to disable aspect-preserving display scaling, which may fill the panel on supported firmware; some Motorola builds may still letterbox. Android normally remaps touch coordinates, but exact game touch behavior must be tested on-device. Force Landscape is a 30-minute system rotation lock; PUBG can still override it on some Android versions.", 12, muted, false);
+        TextView note = label("Presets are landscape aspect-ratio groups: iPad-style 4:3, classic 5:4, drone-style 3:2, and 16:10. Higher logical resolutions do not add physical pixels and may make interface elements smaller. This does not force a game to use the selected viewport or guarantee a slow-motion effect. STRETCHED asks Android to disable aspect-preserving display scaling, which may fill the panel on supported firmware; some Motorola builds may still letterbox. Android normally remaps touch coordinates, but exact game touch behavior must be tested on-device. Force Landscape is a 30-minute system rotation lock; PUBG can still override it on some Android versions.", 12, muted, false);
         LinearLayout.LayoutParams noteLp = params(-1, -2); noteLp.topMargin = dp(12);
         root.addView(note, noteLp);
         setContentView(scroll);
@@ -197,10 +220,52 @@ public class MainActivity extends Activity {
         centerButton.setBackgroundColor(stretched ? Color.rgb(40, 52, 72) : Color.rgb(48, 113, 211));
         if (resolutionSpinner != null) resolutionSpinner.setEnabled(stretched);
         if (previewButton != null) previewButton.setEnabled(stretched);
-        if (preview30Button != null) preview30Button.setEnabled(stretched);
+        if (preview30Button != null) preview30Button.setEnabled(stretched);\n        if (toggleResolutionButton != null) toggleResolutionButton.setEnabled(stretched && pairPreviewCheck != null && pairPreviewCheck.isChecked());
         modeDescription.setText(stretched
                 ? "STRETCHED applies the selected logical resolution. Choose one of the presets below and use a timed preview. The display automatically attempts to return to its saved settings when the preview ends."
                 : "CENTER / NATIVE restores the saved original resolution, DPI, and scaling settings. Android does not provide a universal system-wide GPU-style centered mode.");
+    }
+
+    private void addRatioButton(LinearLayout parent, String label, String[] values, boolean first) {
+        Button b = actionButton(label, first ? Color.rgb(48, 113, 211) : Color.rgb(40, 52, 72), Color.WHITE);
+        b.setTextSize(10);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -1, 1);
+        lp.leftMargin = dp(2); lp.rightMargin = dp(2);
+        parent.addView(b, lp);
+        b.setOnClickListener(v -> {
+            ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, values);
+            adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+            resolutionSpinner.setAdapter(adapter);
+            resolutionSpinner.setSelection(0);
+            showingResolutionA = true;
+            setStatus(label + " aspect presets loaded. Select a resolution.");
+        });
+    }
+
+    private void toggleResolutionManually() {
+        if (!pairPreviewCheck.isChecked()) {
+            setStatus("Check the A/B toggle box first.");
+            return;
+        }
+        // A manual switch is deliberately user-triggered; no rapid automatic flicker loop.
+        showingResolutionA = !showingResolutionA;
+        String[] values = currentAspectValues();
+        int index = showingResolutionA ? 0 : Math.min(1, values.length - 1);
+        String target = values[index];
+        runPreview(target, 30 * 60 * 1000L, "30 minutes");
+        setStatus("Switched to " + (showingResolutionA ? "A: " : "B: ") + target
+                + ". Tap TOGGLE A / B RESOLUTION to switch back.");
+    }
+
+    private String[] currentAspectValues() {
+        Object adapter = resolutionSpinner.getAdapter();
+        if (adapter instanceof ArrayAdapter) {
+            ArrayAdapter<?> a = (ArrayAdapter<?>) adapter;
+            String[] values = new String[a.getCount()];
+            for (int i = 0; i < a.getCount(); i++) values[i] = String.valueOf(a.getItem(i));
+            return values;
+        }
+        return IPAD_4_3;
     }
 
     private String selectedResolution() {
@@ -212,7 +277,7 @@ public class MainActivity extends Activity {
         previewButton.setEnabled(enabled);
         preview30Button.setEnabled(enabled && "stretched".equals(selectedMode));
         if (forceLandscapeButton != null) forceLandscapeButton.setEnabled(enabled);
-        resolutionSpinner.setEnabled(enabled && "stretched".equals(selectedMode));
+        resolutionSpinner.setEnabled(enabled && "stretched".equals(selectedMode));\n        if (toggleResolutionButton != null) toggleResolutionButton.setEnabled(enabled && "stretched".equals(selectedMode) && pairPreviewCheck.isChecked());
     }
 
     private void previewSelectedResolution(long durationMillis, String durationLabel) {
