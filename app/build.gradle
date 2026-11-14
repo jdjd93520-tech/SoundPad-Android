@@ -3,21 +3,20 @@ plugins { id 'com.android.application' }
 android {
     namespace 'com.alxt.SoundPad'
     compileSdk 35
-
     defaultConfig {
-        applicationId 'com.alxt.SoundPad'
-        minSdk 29
+        applicationId 'com.jdjd.displaylauncher'
+        minSdk 23
         targetSdk 35
-        versionCode 7
-        versionName '2.5'
+        versionCode 1
+        versionName '1.0'
     }
-
     buildTypes {
         release {
-            // Installable release-variant build; uses the standard debug key for this test build.
-            // Replace with a private release keystore before publishing to an app store.
             signingConfig signingConfigs.debug
             minifyEnabled false
         }
     }
+}
+dependencies {
+    implementation 'dev.rikka.shizuku:api:13.1.5'
 }
