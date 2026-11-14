@@ -1,29 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="moe.shizuku.manager.permission.API_V23" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <application
-        android:theme="@android:style/Theme.Material.Light.NoActionBar"
-        android:label="SoundPad">
+        android:allowBackup="false"
+        android:label="Display Launcher"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar">
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <service
-            android:name=".ScreenRecordService"
-            android:exported="false"
-            android:foregroundServiceType="mediaProjection" />
-        <service
-            android:name=".AudioBridgeService"
-            android:exported="false"
-            android:foregroundServiceType="mediaPlayback" />
-        <service
-            android:name=".CaptureService"
-            android:exported="false"
-            android:foregroundServiceType="mediaProjection" />
+        <receiver android:name=".RestoreReceiver" android:enabled="true" android:exported="true">
+            <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /></intent-filter>
+        </receiver>
+        <receiver android:name=".RestoreReceiver" android:enabled="true" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.SCREEN_OFF" />
+                <action android:name="com.jdjd.displaylauncher.ACTION_TIMEOUT" />
+            </intent-filter>
+        </receiver>
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:multiprocess="false"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL"
+            android:exported="true" />
     </application>
 </manifest>
