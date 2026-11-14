@@ -5,6 +5,7 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.lang.reflect.Method;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import rikka.shizuku.Shizuku;
@@ -30,7 +31,6 @@ final class DisplayController {
             if (!saved) throw new IllegalStateException("Could not save the original display settings.");
         }
         RestoreScheduler.schedule(context);
-
         String requested = "center".equals(mode) ? "off" : "auto";
         run("wm scaling " + requested);
         String actual = readScaling(run("settings get global display_scaling_force"));
@@ -48,11 +48,9 @@ final class DisplayController {
         if (size == null || density == null || scaling == null) {
             throw new IllegalStateException("No saved original display settings were found.");
         }
-
         restoreSize(size);
         restoreDensity(density);
         run("wm scaling " + scaling);
-
         String actualSize = readSizeOverride(run("wm size"));
         String actualDensity = readDensityOverride(run("wm density"));
         String actualScaling = readScaling(run("settings get global display_scaling_force"));
@@ -83,9 +81,23 @@ final class DisplayController {
         }
     }
 
+    // Shizuku 13.1.5 exposes newProcess as a private helper; invoke that helper reflectively.
+    private static Process createShellProcess(String[] command) throws Exception {
+        Method method = Shizuku.class.getDeclaredMethod("newProcess",
+                String[].class, String[].class, String.class);
+        method.setAccessible(true);
+        try {
+            return (Process) method.invoke(null, new Object[]{command, null, null});
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            Throwable cause = e.getCause();
+            if (cause instanceof Exception) throw (Exception) cause;
+            throw new IllegalStateException("Shizuku could not start the shell process.", cause);
+        }
+    }
+
     private static String run(String command) throws Exception {
         requirePermission();
-        Process process = Shizuku.newProcess(new String[]{"sh", "-c", command + " 2>&1"}, null, null);
+        Process process = createShellProcess(new String[]{"sh", "-c", command + " 2>&1"});
         StringBuilder output = new StringBuilder();
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
             String line;
