@@ -194,8 +194,8 @@ public class MainActivity extends Activity {
         boolean stretched = "stretched".equals(mode);
         stretchedButton.setBackgroundColor(stretched ? Color.rgb(48, 113, 211) : Color.rgb(40, 52, 72));
         centerButton.setBackgroundColor(stretched ? Color.rgb(40, 52, 72) : Color.rgb(48, 113, 211));
-        resolutionSpinner.setEnabled(stretched);
-        previewButton.setEnabled(stretched);
+        if (resolutionSpinner != null) resolutionSpinner.setEnabled(stretched);
+        if (previewButton != null) previewButton.setEnabled(stretched);
         modeDescription.setText(stretched
                 ? "STRETCHED applies the selected logical resolution. Choose one of the presets below, preview it briefly, or apply it for up to 10 minutes before the safety restore."
                 : "CENTER / NATIVE restores the saved original resolution, DPI, and scaling settings. Android does not provide a universal system-wide GPU-style centered mode.");
