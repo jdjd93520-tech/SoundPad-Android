@@ -153,7 +153,7 @@ public class MainActivity extends Activity {
         TextView safety = label("The selected resolution is temporary and automatically restores after the preview. Keep Shizuku running so the restore can complete. If the display or touch layout looks wrong, use RESTORE ORIGINAL DISPLAY or wait for the timer.", 12, muted, false);
         LinearLayout.LayoutParams safetyLp = params(-1, -2); safetyLp.topMargin = dp(20);
         root.addView(safety, safetyLp);
-        TextView note = label("Resolution values are sent in Android's natural portrait order (short side x long side), then the display is rotated to landscape. The app keeps your original DPI unchanged to avoid unnecessary UI and touch-size changes. Android still controls touch mapping; some OEMs or apps may handle custom sizes differently.", 12, muted, false);
+        TextView note = label("Resolution values are sent in Android's device natural-orientation order, then the display is rotated to landscape. The app keeps your original DPI unchanged to avoid unnecessary UI and touch-size changes. Android still controls touch mapping; some OEMs or apps may handle custom sizes differently.", 12, muted, false);
         LinearLayout.LayoutParams noteLp = params(-1, -2); noteLp.topMargin = dp(12);
         root.addView(note, noteLp);
         setContentView(scroll);
@@ -269,7 +269,7 @@ public class MainActivity extends Activity {
                 .setTitle("Touch & full-screen guide")
                 .setMessage(
                         "ANDROID GAMES\n" +
-                        "1. Choose a landscape ratio. The app sends the size in natural portrait order (short side x long side), then locks landscape.\n" +
+                        "1. Choose a landscape ratio. The app sends the size in device natural-orientation order, then locks landscape.\n" +
                         "2. Open Android Settings and look for Display > Full-screen apps, App aspect ratio, or Camera cutout. If your phone offers a per-app full-screen option, enable it for the app you want. Menu names vary by brand; this app does not change hidden OEM settings.\n" +
                         "3. Keep the original DPI. Android normally maps touch using its display configuration, but some games or manufacturer builds may not handle custom sizes correctly. Test the corners and buttons before using a long preview. Restore immediately if touch is offset.\n" +
                         "4. If reverse landscape behaves differently, rotate the phone 180 degrees and test again. This is only a compatibility check, not a guaranteed fix.\n\n" +
@@ -287,22 +287,31 @@ public class MainActivity extends Activity {
     private String[] buildResolutionOptions() {
         DisplayMetrics metrics = new DisplayMetrics();
         getWindowManager().getDefaultDisplay().getRealMetrics(metrics);
-        int longEdge = Math.max(metrics.widthPixels, metrics.heightPixels);
-        int shortEdge = Math.min(metrics.widthPixels, metrics.heightPixels);
+        int rotation = getWindowManager().getDefaultDisplay().getRotation();
+        boolean metricsAreRotated = rotation == 1 || rotation == 3;
+        int naturalWidth = metricsAreRotated ? metrics.heightPixels : metrics.widthPixels;
+        int naturalHeight = metricsAreRotated ? metrics.widthPixels : metrics.heightPixels;
+        int shortEdge = Math.min(naturalWidth, naturalHeight);
+        int longEdge = Math.max(naturalWidth, naturalHeight);
         if (longEdge < 320 || shortEdge < 320) {
-            longEdge = 1600;
             shortEdge = 720;
+            longEdge = 1600;
+            naturalWidth = shortEdge;
+            naturalHeight = longEdge;
         }
+        boolean naturalPortrait = naturalWidth < naturalHeight;
         LinkedHashSet<String> options = new LinkedHashSet<>();
         double[] ratios = {4.0 / 3.0, 16.0 / 9.0, 18.0 / 9.0, 19.5 / 9.0, 20.0 / 9.0};
         String[] names = {"4:3", "16:9", "18:9", "19.5:9", "20:9"};
         for (int i = 0; i < ratios.length; i++) {
-            int logicalHeight = (int) Math.round(shortEdge * ratios[i]);
-            if (logicalHeight <= longEdge) {
-                options.add("Landscape " + names[i] + " — " + shortEdge + "x" + logicalHeight);
+            int longSide = (int) Math.round(shortEdge * ratios[i]);
+            if (longSide <= longEdge) {
+                int logicalWidth = naturalPortrait ? shortEdge : longSide;
+                int logicalHeight = naturalPortrait ? longSide : shortEdge;
+                options.add("Landscape " + names[i] + " — " + logicalWidth + "x" + logicalHeight);
             }
         }
-        options.add("Native aspect — " + shortEdge + "x" + longEdge);
+        options.add("Native aspect — " + naturalWidth + "x" + naturalHeight);
         return options.toArray(new String[0]);
     }
 
