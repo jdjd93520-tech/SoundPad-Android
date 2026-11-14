@@ -18,7 +18,7 @@ import rikka.shizuku.Shizuku;
 
 public class MainActivity extends Activity {
     private static final int REQUEST_SHIZUKU = 42;
-    private static final String[] RESOLUTIONS = {"720x1360", "700x1360", "900x1600", "540x1080"};
+    private static final String[] RESOLUTIONS = {"720x1360", "700x1360", "900x1600", "540x1080", "1024x768"};
     private String selectedMode = "stretched";
     private TextView statusText, displayText, modeDescription;
     private Button stretchedButton, centerButton, previewButton, preview30Button;
