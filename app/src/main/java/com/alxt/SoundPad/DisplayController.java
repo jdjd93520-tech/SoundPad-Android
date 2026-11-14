@@ -117,9 +117,14 @@ final class DisplayController {
         String actualSize = readSizeOverride(run("wm size"));
         String actualDensity = readDensityOverride(run("wm density"));
         String actualScaling = readScaling(run("settings get global display_scaling_force"));
-        if (!size.equals(actualSize) || !density.equals(actualDensity) || !scaling.equals(actualScaling)) {
+        String actualAutoRotate = autoRotate == null ? null : run("settings get system accelerometer_rotation");
+        String actualUserRotation = userRotation == null ? null : run("settings get system user_rotation");
+        if (!size.equals(actualSize) || !density.equals(actualDensity) || !scaling.equals(actualScaling)
+                || (autoRotate != null && !autoRotate.equals(actualAutoRotate))
+                || (userRotation != null && !userRotation.equals(actualUserRotation))) {
             throw new IllegalStateException("Restore verification failed. Current: size=" + actualSize
-                    + ", density=" + actualDensity + ", scaling=" + actualScaling);
+                    + ", density=" + actualDensity + ", scaling=" + actualScaling
+                    + ", auto-rotate=" + actualAutoRotate + ", rotation=" + actualUserRotation);
         }
     }
 
