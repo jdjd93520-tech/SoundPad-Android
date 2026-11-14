@@ -18,6 +18,7 @@ public class MainActivity extends Activity {
     private String selectedMode = "stretched";
     private TextView statusText, displayText, modeDescription;
     private Button stretchedButton, centerButton, applyButton;
+    private boolean permissionListenerRegistered;
 
     private final Shizuku.OnRequestPermissionResultListener permissionListener =
             (requestCode, grantResult) -> {
@@ -31,15 +32,33 @@ public class MainActivity extends Activity {
 
     @Override protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        Shizuku.addRequestPermissionResultListener(permissionListener);
-        buildUi();
+        try {
+            buildUi();
+        } catch (RuntimeException e) {
+            TextView fallback = new TextView(this);
+            fallback.setTextColor(Color.BLACK);
+            fallback.setTextSize(16);
+            fallback.setPadding(32, 32, 32, 32);
+            fallback.setText("Display Launcher could not create its screen.\n\n" + safeMessage(e));
+            setContentView(fallback);
+            return;
+        }
+        try {
+            Shizuku.addRequestPermissionResultListener(permissionListener);
+            permissionListenerRegistered = true;
+        } catch (RuntimeException e) {
+            setStatus("Shizuku initialization problem: " + safeMessage(e));
+        }
         refreshStatus();
     }
 
     @Override protected void onResume() { super.onResume(); refreshStatus(); }
 
     @Override protected void onDestroy() {
-        Shizuku.removeRequestPermissionResultListener(permissionListener);
+        if (permissionListenerRegistered) {
+            try { Shizuku.removeRequestPermissionResultListener(permissionListener); }
+            catch (RuntimeException ignored) { }
+        }
         super.onDestroy();
     }
 
