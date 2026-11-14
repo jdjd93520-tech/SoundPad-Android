@@ -18,7 +18,7 @@ final class DisplayController {
     private static final String KEY_SCALING = "original_scaling";
     private static final String KEY_AUTO_ROTATE = "original_auto_rotate";
     private static final String KEY_USER_ROTATION = "original_user_rotation";
-    private static final String[] ALLOWED_RESOLUTIONS = {"800x600", "960x720", "1024x768", "1280x960", "1440x1080", "1600x1200", "1920x1440", "800x640", "1000x800", "1280x1024", "1600x1280", "1200x800", "1440x960", "1620x1080", "1920x1280", "1280x800", "1600x1000"};
+    private static final String[] ALLOWED_RESOLUTIONS = {"1600x718", "1440x646", "1280x574", "1024x460", "960x430", "800x360", "800x600", "960x720", "1024x768", "1280x960", "1440x1080", "1600x1200", "1920x1440", "800x640", "1000x800", "1280x1024", "1600x1280", "1200x800", "1440x960", "1620x1080", "1920x1280", "1280x800", "1600x1000"};
 
     private DisplayController() {}
 
