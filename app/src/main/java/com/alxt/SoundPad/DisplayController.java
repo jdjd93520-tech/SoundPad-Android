@@ -16,37 +16,37 @@ final class DisplayController {
     private static final String KEY_SIZE = "original_size";
     private static final String KEY_DENSITY = "original_density";
     private static final String KEY_SCALING = "original_scaling";
+    private static final String[] ALLOWED_RESOLUTIONS = {"700x1360", "900x1600", "540x1080"};
 
     private DisplayController() {}
 
-    static synchronized void applyMode(Context context, String mode) throws Exception {
+    static synchronized void applyMode(Context context, String mode, String resolution) throws Exception {
         requirePermission();
         SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        if (!prefs.getBoolean(KEY_ACTIVE, false)) {
-            String size = readSizeOverride(run("wm size"));
-            String density = readDensityOverride(run("wm density"));
-            String scaling = readScaling(run("settings get global display_scaling_force"));
-            boolean saved = prefs.edit().putString(KEY_SIZE, size).putString(KEY_DENSITY, density)
-                    .putString(KEY_SCALING, scaling).putBoolean(KEY_ACTIVE, true).commit();
-            if (!saved) throw new IllegalStateException("Could not save the original display settings.");
-        }
-        RestoreScheduler.schedule(context);
-
         if ("center".equals(mode)) {
-            // Android has no universal command for GPU-style centered, unscaled output.
-            // The safe native fallback is to return to the user's saved display configuration.
+            if (!prefs.getBoolean(KEY_ACTIVE, false)) {
+                throw new IllegalStateException("There are no saved display settings to restore. Apply a resolution first.");
+            }
             restoreSavedConfiguration(prefs);
+            prefs.edit().putBoolean(KEY_ACTIVE, false).commit();
+            RestoreScheduler.cancel(context);
             return;
         }
+        validateResolution(resolution);
+        saveOriginalIfNeeded(context, prefs);
+        run("wm size " + resolution);
+        verifyResolution(resolution);
+        RestoreScheduler.schedule(context, 10 * 60 * 1000L);
+    }
 
-        String physical = readPhysicalSize(run("wm size"));
-        String target = landscapeSixteenNineLogicalSize(physical);
-        run("wm size " + target);
-        String actual = readSizeOverride(run("wm size"));
-        if (!target.equals(actual)) {
-            throw new IllegalStateException("Android did not confirm the 16:9 logical resolution. Requested: "
-                    + target + ", reported: " + actual);
-        }
+    static synchronized void previewResolution(Context context, String resolution) throws Exception {
+        requirePermission();
+        validateResolution(resolution);
+        SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        saveOriginalIfNeeded(context, prefs);
+        run("wm size " + resolution);
+        verifyResolution(resolution);
+        RestoreScheduler.schedule(context, 20 * 1000L);
     }
 
     static synchronized void restoreOriginal(Context context) throws Exception {
@@ -58,6 +58,28 @@ final class DisplayController {
         restoreSavedConfiguration(prefs);
         prefs.edit().putBoolean(KEY_ACTIVE, false).remove("last_restore_error").commit();
         RestoreScheduler.cancel(context);
+    }
+
+    private static void saveOriginalIfNeeded(Context context, SharedPreferences prefs) throws Exception {
+        if (prefs.getBoolean(KEY_ACTIVE, false)) return;
+        String size = readSizeOverride(run("wm size"));
+        String density = readDensityOverride(run("wm density"));
+        String scaling = readScaling(run("settings get global display_scaling_force"));
+        boolean saved = prefs.edit().putString(KEY_SIZE, size).putString(KEY_DENSITY, density)
+                .putString(KEY_SCALING, scaling).putBoolean(KEY_ACTIVE, true).commit();
+        if (!saved) throw new IllegalStateException("Could not save the original display settings.");
+    }
+
+    private static void validateResolution(String resolution) {
+        for (String allowed : ALLOWED_RESOLUTIONS) if (allowed.equals(resolution)) return;
+        throw new IllegalArgumentException("Choose one of the supported resolutions in the list.");
+    }
+
+    private static void verifyResolution(String requested) throws Exception {
+        String actual = readSizeOverride(run("wm size"));
+        if (!requested.equals(actual)) {
+            throw new IllegalStateException("Android did not confirm " + requested + ". It reported " + actual);
+        }
     }
 
     private static void restoreSavedConfiguration(SharedPreferences prefs) throws Exception {
@@ -123,22 +145,6 @@ final class DisplayController {
         String result = output.toString().trim();
         if (code != 0) throw new IllegalStateException(command + " failed: " + result);
         return result;
-    }
-
-    private static String landscapeSixteenNineLogicalSize(String physicalSize) {
-        Matcher matcher = Pattern.compile("^(\\d+)x(\\d+)$").matcher(physicalSize);
-        if (!matcher.matches()) throw new IllegalStateException("Could not read physical display resolution: " + physicalSize);
-        int width = Integer.parseInt(matcher.group(1));
-        int height = Integer.parseInt(matcher.group(2));
-        int shortSide = Math.min(width, height);
-        int longSide = ((shortSide * 16 / 9) + 1) & ~1;
-        return width <= height ? shortSide + "x" + longSide : longSide + "x" + shortSide;
-    }
-
-    private static String readPhysicalSize(String output) {
-        Matcher m = Pattern.compile("(?m)^Physical size: (\\d+x\\d+)\\s*$").matcher(output);
-        if (!m.find()) throw new IllegalStateException("Android did not report the panel's physical resolution: " + output);
-        return m.group(1);
     }
 
     private static void restoreSize(String value) throws Exception {
