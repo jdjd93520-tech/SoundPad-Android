@@ -28,8 +28,10 @@ final class DisplayController {
     static synchronized void previewResolution(Context context, String resolution, long durationMillis) throws Exception {
         requirePermission();
         validateResolution(resolution);
-        if (durationMillis != 20 * 1000L && durationMillis != 30 * 60 * 1000L) {
-            throw new IllegalArgumentException("Unsupported preview duration.");
+        boolean experimental200x1080 = "200x1080".equals(resolution) || "1080x200".equals(resolution);
+        if ((durationMillis != 20 * 1000L && durationMillis != 30 * 60 * 1000L)
+                || (experimental200x1080 && durationMillis != 20 * 1000L)) {
+            throw new IllegalArgumentException("The experimental 200x1080 mode is limited to a 20-second preview.");
         }
         SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         saveOriginalIfNeeded(context, prefs);
@@ -94,9 +96,12 @@ final class DisplayController {
         if (!matcher.matches()) throw new IllegalArgumentException("Resolution format must be WIDTHxHEIGHT.");
         int width = Integer.parseInt(matcher.group(1));
         int height = Integer.parseInt(matcher.group(2));
-        if (width < 320 || height < 320 || width > 8192 || height > 8192
+        boolean experimental200x1080 = (width == 200 && height == 1080)
+                || (width == 1080 && height == 200);
+        if ((!experimental200x1080 && (width < 320 || height < 320))
+                || width > 8192 || height > 8192
                 || (long) width * (long) height > 20000000L) {
-            throw new IllegalArgumentException("Choose a supported landscape resolution within Android's safe size limits.");
+            throw new IllegalArgumentException("Choose a supported resolution within Android's safe size limits.");
         }
     }
 
