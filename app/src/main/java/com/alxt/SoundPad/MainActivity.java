@@ -19,7 +19,7 @@ import rikka.shizuku.Shizuku;
 public class MainActivity extends Activity {
     private static final int REQUEST_SHIZUKU = 42;
     private TextView statusText, displayText;
-    private Button previewButton, forceLandscapeButton;
+    private Button applyButton, previewButton, forceLandscapeButton, restoreButton;
     private Spinner resolutionSpinner;
     private boolean permissionListenerRegistered;
     private boolean permissionRequestAttemptedThisSession;
@@ -115,24 +115,24 @@ public class MainActivity extends Activity {
         TextView resolutionTitle = label("RESOLUTION", 12, muted, true);
         LinearLayout.LayoutParams resolutionTitleLp = params(-1, -2);
         resolutionTitleLp.topMargin = dp(24);
-        root.addView(resolutionTitle, resolutionTitleLp);
+        root.addView(label("FULL-PANEL / STRETCHED RESOLUTION", 12, muted, true), resolutionTitleLp);
         resolutionSpinner = new Spinner(this);
-        String[] resolutions = {"1024x768", "1280x960", "1440x1080", "1600x1200",
-                "1920x1440", "800x600", "960x720", "800x640", "1000x800",
-                "1280x1024", "1600x1280", "1200x800", "1440x960", "1620x1080",
-                "1920x1280", "1280x800", "1600x1000"};
+        String[] resolutions = {"1600x718", "1440x646", "1280x574", "1024x460", "960x430", "800x360",
+                "1024x768", "1280x960", "1440x1080", "1600x1200", "1920x1440",
+                "800x600", "960x720", "800x640", "1000x800", "1280x1024", "1600x1280",
+                "1200x800", "1440x960", "1620x1080", "1920x1280", "1280x800", "1600x1000"};
         ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, resolutions);
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         resolutionSpinner.setAdapter(adapter);
-        resolutionSpinner.setSelection(0);
+        resolutionSpinner.setSelection(3);
         LinearLayout.LayoutParams spinnerLp = params(-1, dp(54));
         spinnerLp.topMargin = dp(8);
         root.addView(resolutionSpinner, spinnerLp);
-        Button stretchButton = actionButton("STRETCH / FILL SCREEN", accent, Color.WHITE);
+        applyButton = actionButton("APPLY FULL-PANEL SCALE", accent, Color.WHITE);
         LinearLayout.LayoutParams stretchLp = params(-1, dp(58));
         stretchLp.topMargin = dp(14);
-        root.addView(stretchButton, stretchLp);
-        stretchButton.setOnClickListener(v -> previewSelectedResolution(30 * 60 * 1000L, "30 minutes"));
+        root.addView(applyButton, stretchLp);
+        applyButton.setOnClickListener(v -> previewSelectedResolution(30 * 60 * 1000L, "30 minutes"));
         previewButton = actionButton("QUICK PREVIEW (20 SEC)", Color.rgb(48, 62, 84), fg);
         LinearLayout.LayoutParams previewLp = params(-1, dp(54));
         previewLp.topMargin = dp(10);
@@ -143,14 +143,14 @@ public class MainActivity extends Activity {
         forceLp.topMargin = dp(10);
         root.addView(forceLandscapeButton, forceLp);
         forceLandscapeButton.setOnClickListener(v -> forceLandscapeNow());
-        Button restore = actionButton("RESTORE ORIGINAL DISPLAY", Color.rgb(48, 62, 84), fg);
+        restoreButton = actionButton("RESTORE ORIGINAL DISPLAY", Color.rgb(48, 62, 84), fg);
         LinearLayout.LayoutParams restoreLp = params(-1, dp(54)); restoreLp.topMargin = dp(10);
-        root.addView(restore, restoreLp);
-        restore.setOnClickListener(v -> confirmRestore());
+        root.addView(restoreButton, restoreLp);
+        restoreButton.setOnClickListener(v -> confirmRestore());
         TextView safety = label("The selected resolution is temporary and automatically restores after the preview. Keep Shizuku running so the restore can complete. If the display or touch layout looks wrong, use RESTORE ORIGINAL DISPLAY or wait for the timer.", 12, muted, false);
         LinearLayout.LayoutParams safetyLp = params(-1, -2); safetyLp.topMargin = dp(20);
         root.addView(safety, safetyLp);
-        TextView note = label("This build enables Android automatic display scaling instead of disabling scaling. Android's standard scaling mode does not provide a universal non-uniform GPU stretch switch. If Motorola firmware or an app preserves the selected resolution's aspect ratio, black bars may still appear. The Windows-only projects linked as examples use Windows display/GPU APIs and cannot directly provide that feature on Android.", 12, muted, false);
+        TextView note = label("The first six choices are wide landscape resolutions matched to an approximately 1604x720 phone panel; choose one of these to reduce side bars. Android Auto scaling is enabled. This is the closest standard Android system-level full-panel mode, not a universal GPU warp: some games or Motorola firmware may still letterbox or keep their own aspect ratio. The 4:3 choices are included for compatibility and can show bars.", 12, muted, false);
         LinearLayout.LayoutParams noteLp = params(-1, -2); noteLp.topMargin = dp(12);
         root.addView(note, noteLp);
         setContentView(scroll);
@@ -259,6 +259,20 @@ public class MainActivity extends Activity {
             final String s = status, d = display;
             runOnUiThread(() -> { statusText.setText(s); displayText.setText(d); });
         }).start();
+    }
+
+    private String selectedResolution() {
+        Object selected = resolutionSpinner == null ? null : resolutionSpinner.getSelectedItem();
+        if (selected == null) throw new IllegalStateException("Choose a resolution first.");
+        return selected.toString();
+    }
+
+    private void setActionsEnabled(boolean enabled) {
+        if (resolutionSpinner != null) resolutionSpinner.setEnabled(enabled);
+        if (applyButton != null) applyButton.setEnabled(enabled);
+        if (previewButton != null) previewButton.setEnabled(enabled);
+        if (forceLandscapeButton != null) forceLandscapeButton.setEnabled(enabled);
+        if (restoreButton != null) restoreButton.setEnabled(enabled);
     }
 
     private void setStatus(String value) { if (statusText != null) statusText.setText(value); }
