@@ -34,9 +34,7 @@ final class DisplayController {
         }
         validateResolution(resolution);
         saveOriginalIfNeeded(context, prefs);
-        run("wm size " + resolution);
-        verifyResolution(resolution);
-        RestoreScheduler.schedule(context, 10 * 60 * 1000L);
+        applyResolutionSafely(context, prefs, resolution, 10 * 60 * 1000L);
     }
 
     static synchronized void previewResolution(Context context, String resolution) throws Exception {
@@ -51,9 +49,7 @@ final class DisplayController {
         }
         SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         saveOriginalIfNeeded(context, prefs);
-        run("wm size " + resolution);
-        verifyResolution(resolution);
-        RestoreScheduler.schedule(context, durationMillis);
+        applyResolutionSafely(context, prefs, resolution, durationMillis);
     }
 
     static synchronized void restoreOriginal(Context context) throws Exception {
@@ -86,6 +82,33 @@ final class DisplayController {
         String actual = readSizeOverride(run("wm size"));
         if (!requested.equals(actual)) {
             throw new IllegalStateException("Android did not confirm " + requested + ". It reported " + actual);
+        }
+    }
+
+    private static void applyResolutionSafely(Context context, SharedPreferences prefs,
+            String resolution, long restoreDelayMillis) throws Exception {
+        RestoreScheduler.schedule(context, restoreDelayMillis);
+        boolean narrowPreset = "200x1600".equals(resolution) || "100x1080".equals(resolution);
+        try {
+            if (narrowPreset) run("wm scaling auto");
+            run("wm size " + resolution);
+            verifyResolution(resolution);
+            if (narrowPreset) {
+                String scaling = readScaling(run("settings get global display_scaling_force"));
+                if (!"auto".equals(scaling)) {
+                    throw new IllegalStateException("Android did not confirm automatic display scaling.");
+                }
+            }
+        } catch (Exception applyError) {
+            try {
+                restoreSavedConfiguration(prefs);
+                prefs.edit().putBoolean(KEY_ACTIVE, false).commit();
+                RestoreScheduler.cancel(context);
+            } catch (Exception restoreError) {
+                applyError.addSuppressed(restoreError);
+                RestoreScheduler.schedule(context, 60 * 1000L);
+            }
+            throw applyError;
         }
     }
 
