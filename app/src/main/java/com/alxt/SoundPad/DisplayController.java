@@ -37,6 +37,20 @@ final class DisplayController {
         applyResolutionSafely(context, prefs, resolution, durationMillis);
     }
 
+    static synchronized void forceLandscape(Context context) throws Exception {
+        requirePermission();
+        SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        saveOriginalIfNeeded(context, prefs);
+        RestoreScheduler.schedule(context, 30 * 60 * 1000L);
+        run("settings put system accelerometer_rotation 0");
+        run("settings put system user_rotation 1");
+        String autoRotate = run("settings get system accelerometer_rotation");
+        String userRotation = run("settings get system user_rotation");
+        if (!"0".equals(autoRotate.trim()) || !"1".equals(userRotation.trim())) {
+            throw new IllegalStateException("Android did not confirm the landscape rotation lock.");
+        }
+    }
+
     static synchronized void restoreOriginal(Context context) throws Exception {
         requirePermission();
         SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
@@ -81,6 +95,9 @@ final class DisplayController {
             // Temporarily lock Android to landscape while the preview is active.
             run("settings put system accelerometer_rotation 0");
             run("settings put system user_rotation 1");
+            // Disable aspect-preserving compatibility scaling so the logical frame is
+            // mapped edge-to-edge where the device compositor supports this mode.
+            run("wm scaling off");
             run("wm size " + resolution);
             verifyResolution(resolution);
         } catch (Exception applyError) {
