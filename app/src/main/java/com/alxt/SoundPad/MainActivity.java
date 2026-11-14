@@ -18,10 +18,10 @@ import rikka.shizuku.Shizuku;
 
 public class MainActivity extends Activity {
     private static final int REQUEST_SHIZUKU = 42;
-    private static final String[] RESOLUTIONS = {"700x1360", "900x1600", "540x1080", "200x1600", "100x1080"};
+    private static final String[] RESOLUTIONS = {"720x1360", "700x1360", "900x1600", "540x1080"};
     private String selectedMode = "stretched";
     private TextView statusText, displayText, modeDescription;
-    private Button stretchedButton, centerButton, applyButton, previewButton, preview30Button;
+    private Button stretchedButton, centerButton, previewButton, preview30Button;
     private Spinner resolutionSpinner;
     private boolean permissionListenerRegistered;
     private boolean permissionRequestAttemptedThisSession;
@@ -157,36 +157,24 @@ public class MainActivity extends Activity {
         spinnerLp.topMargin = dp(8);
         root.addView(resolutionSpinner, spinnerLp);
 
-        LinearLayout actions = new LinearLayout(this);
-        actions.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams actionsLp = params(-1, dp(58));
-        actionsLp.topMargin = dp(14);
-        root.addView(actions, actionsLp);
-
         previewButton = actionButton("PREVIEW 20 SEC", Color.rgb(48, 62, 84), fg);
-        applyButton = actionButton("APPLY", accent, Color.WHITE);
-        LinearLayout.LayoutParams previewLp = new LinearLayout.LayoutParams(0, -1, 1);
-        previewLp.rightMargin = dp(5);
-        actions.addView(previewButton, previewLp);
-        LinearLayout.LayoutParams applyLp = new LinearLayout.LayoutParams(0, -1, 1);
-        applyLp.leftMargin = dp(5);
-        actions.addView(applyButton, applyLp);
+        LinearLayout.LayoutParams previewLp = params(-1, dp(54));
+        previewLp.topMargin = dp(14);
+        root.addView(previewButton, previewLp);
         previewButton.setOnClickListener(v -> previewSelectedResolution(20 * 1000L, "20 seconds"));
 
-        preview30Button = actionButton("PREVIEW 30 MIN", Color.rgb(48, 62, 84), fg);
+        preview30Button = actionButton("PREVIEW 30 MIN", accent, Color.WHITE);
         LinearLayout.LayoutParams preview30Lp = params(-1, dp(54));
         preview30Lp.topMargin = dp(10);
         root.addView(preview30Button, preview30Lp);
         preview30Button.setOnClickListener(v -> previewSelectedResolution(30 * 60 * 1000L, "30 minutes"));
-
-        applyButton.setOnClickListener(v -> confirmApply());
 
         Button restore = actionButton("RESTORE ORIGINAL DISPLAY", Color.rgb(48, 62, 84), fg);
         LinearLayout.LayoutParams restoreLp = params(-1, dp(54)); restoreLp.topMargin = dp(10);
         root.addView(restore, restoreLp);
         restore.setOnClickListener(v -> confirmRestore());
 
-        TextView safety = label("PREVIEW 20 SEC and PREVIEW 30 MIN temporarily apply the selected resolution, then attempt to restore your saved settings automatically. APPLY keeps the selected resolution active and schedules a safety restore after 10 minutes. You can restore sooner with RESTORE ORIGINAL DISPLAY. Shizuku must remain available for automatic restore.", 12, muted, false);
+        TextView safety = label("PREVIEW 20 SEC and PREVIEW 30 MIN temporarily apply the selected resolution, then attempt to restore your saved settings automatically. There is no permanent apply option. You can restore sooner with RESTORE ORIGINAL DISPLAY. Keep Shizuku running and available for automatic restore.", 12, muted, false);
         LinearLayout.LayoutParams safetyLp = params(-1, -2); safetyLp.topMargin = dp(20);
         root.addView(safety, safetyLp);
 
@@ -205,7 +193,7 @@ public class MainActivity extends Activity {
         if (previewButton != null) previewButton.setEnabled(stretched);
         if (preview30Button != null) preview30Button.setEnabled(stretched);
         modeDescription.setText(stretched
-                ? "STRETCHED applies the selected logical resolution. Choose one of the presets below, preview it briefly, or apply it for up to 10 minutes before the safety restore."
+                ? "STRETCHED applies the selected logical resolution. Choose one of the presets below and use a timed preview. The display automatically attempts to return to its saved settings when the preview ends."
                 : "CENTER / NATIVE restores the saved original resolution, DPI, and scaling settings. Android does not provide a universal system-wide GPU-style centered mode.");
     }
 
@@ -215,7 +203,6 @@ public class MainActivity extends Activity {
     }
 
     private void setActionsEnabled(boolean enabled) {
-        applyButton.setEnabled(enabled);
         previewButton.setEnabled(enabled);
         preview30Button.setEnabled(enabled && "stretched".equals(selectedMode));
         resolutionSpinner.setEnabled(enabled && "stretched".equals(selectedMode));
@@ -247,35 +234,6 @@ public class MainActivity extends Activity {
                 });
             } catch (Exception e) {
                 runOnUiThread(() -> { setActionsEnabled(true); setStatus("Preview failed: " + safeMessage(e)); });
-            }
-        }).start();
-    }
-
-    private void confirmApply() {
-        if ("center".equals(selectedMode)) {
-            confirmRestore();
-            return;
-        }
-        final String resolution = selectedResolution();
-        new AlertDialog.Builder(this).setTitle("Apply " + resolution + "?")
-                .setMessage("Android will save your current display settings, apply this logical resolution, and schedule an automatic restore after 10 minutes. Touch coordinate behavior can vary by device.")
-                .setNegativeButton("CANCEL", null)
-                .setPositiveButton("APPLY", (d, w) -> applySelectedMode(resolution)).show();
-    }
-
-    private void applySelectedMode(String resolution) {
-        if (!hasShizukuPermission()) return;
-        setActionsEnabled(false);
-        new Thread(() -> {
-            try {
-                DisplayController.applyMode(this, selectedMode, resolution);
-                runOnUiThread(() -> {
-                    setActionsEnabled(true);
-                    setStatus("Applied " + resolution + " and verified Android's reported override. Safety restore is scheduled for 10 minutes.");
-                    refreshStatus();
-                });
-            } catch (Exception e) {
-                runOnUiThread(() -> { setActionsEnabled(true); setStatus("Apply failed: " + safeMessage(e)); });
             }
         }).start();
     }
