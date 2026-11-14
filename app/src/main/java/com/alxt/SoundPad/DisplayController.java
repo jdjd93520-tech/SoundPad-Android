@@ -18,7 +18,6 @@ final class DisplayController {
     private static final String KEY_SCALING = "original_scaling";
     private static final String KEY_AUTO_ROTATE = "original_auto_rotate";
     private static final String KEY_USER_ROTATION = "original_user_rotation";
-    private static final String[] ALLOWED_RESOLUTIONS = {"1600x718", "1440x646", "1280x574", "1024x460", "960x430", "800x360", "800x600", "960x720", "1024x768", "1280x960", "1440x1080", "1600x1200", "1920x1440", "800x640", "1000x800", "1280x1024", "1600x1280", "1200x800", "1440x960", "1620x1080", "1920x1280", "1280x800", "1600x1000"};
 
     private DisplayController() {}
 
@@ -76,8 +75,14 @@ final class DisplayController {
     }
 
     private static void validateResolution(String resolution) {
-        for (String allowed : ALLOWED_RESOLUTIONS) if (allowed.equals(resolution)) return;
-        throw new IllegalArgumentException("Choose one of the supported resolutions in the list.");
+        Matcher matcher = Pattern.compile("^(\\\\d{3,4})x(\\\\d{3,4})$").matcher(resolution);
+        if (!matcher.matches()) throw new IllegalArgumentException("Resolution format must be WIDTHxHEIGHT.");
+        int width = Integer.parseInt(matcher.group(1));
+        int height = Integer.parseInt(matcher.group(2));
+        if (width < 320 || height < 320 || width > 8192 || height > 8192
+                || (long) width * (long) height > 20000000L || width < height) {
+            throw new IllegalArgumentException("Choose a supported landscape resolution within Android's safe size limits.");
+        }
     }
 
     private static void verifyResolution(String requested) throws Exception {
