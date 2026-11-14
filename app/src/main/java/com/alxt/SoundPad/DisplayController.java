@@ -75,12 +75,12 @@ final class DisplayController {
     }
 
     private static void validateResolution(String resolution) {
-        Matcher matcher = Pattern.compile("^(\\\\d{3,4})x(\\\\d{3,4})$").matcher(resolution);
+        Matcher matcher = Pattern.compile("^(\\d{3,4})x(\\d{3,4})$").matcher(resolution);
         if (!matcher.matches()) throw new IllegalArgumentException("Resolution format must be WIDTHxHEIGHT.");
         int width = Integer.parseInt(matcher.group(1));
         int height = Integer.parseInt(matcher.group(2));
         if (width < 320 || height < 320 || width > 8192 || height > 8192
-                || (long) width * (long) height > 20000000L || width < height) {
+                || (long) width * (long) height > 20000000L || width > height) {
             throw new IllegalArgumentException("Choose a supported landscape resolution within Android's safe size limits.");
         }
     }
