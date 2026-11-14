@@ -151,7 +151,7 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams safetyLp = params(-1, -2); safetyLp.topMargin = dp(20);
         root.addView(safety, safetyLp);
 
-        TextView note = label("Mode behavior depends on the Android device's display-scaling implementation. If your device does not support the scaling command, the app will show the command error instead of claiming it worked.", 12, muted, false);
+        TextView note = label("STRETCHED changes the logical resolution to a 16:9 landscape shape; it does not force a vendor GPU scaling mode. Some Android devices preserve aspect ratio or letterbox instead of stretching. If that happens, this phone does not expose a system-wide stretch control through these Android commands.", 12, muted, false);
         LinearLayout.LayoutParams noteLp = params(-1, -2); noteLp.topMargin = dp(12);
         root.addView(note, noteLp);
         setContentView(scroll);
@@ -163,8 +163,8 @@ public class MainActivity extends Activity {
         stretchedButton.setBackgroundColor(stretched ? Color.rgb(48, 113, 211) : Color.rgb(40, 52, 72));
         centerButton.setBackgroundColor(stretched ? Color.rgb(40, 52, 72) : Color.rgb(48, 113, 211));
         modeDescription.setText(stretched
-                ? "STRETCHED uses Android's automatic display scaling mode. The device decides how logical display content is fitted to the physical panel."
-                : "CENTER disables Android display scaling. Content is rendered without automatic fit-to-panel scaling; the exact result depends on your device.");
+                ? "STRETCHED applies a 16:9 logical resolution based on your panel size. Android maps that image to the physical screen; visible edge-to-edge stretching depends on your phone."
+                : "CENTER / NATIVE restores the display resolution and scaling settings saved before the change. Android has no universal system-wide command for true GPU-style centered, unscaled output.");
     }
 
     private void confirmApply() {
@@ -182,7 +182,7 @@ public class MainActivity extends Activity {
                 DisplayController.applyMode(this, selectedMode);
                 runOnUiThread(() -> {
                     applyButton.setEnabled(true);
-                    setStatus(selectedMode.toUpperCase() + " mode applied and verified. Automatic restore is scheduled for 10 minutes.");
+                    setStatus("stretched".equals(selectedMode) ? "16:9 logical resolution applied and verified. Check whether your phone stretches it to fill the panel. Auto-restore is scheduled for 10 minutes." : "Original display configuration restored. Press RESTORE ORIGINAL DISPLAY to clear the safety timer.");
                     refreshStatus();
                 });
             } catch (Exception e) {
