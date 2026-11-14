@@ -19,6 +19,7 @@ public class MainActivity extends Activity {
     private TextView statusText, displayText, modeDescription;
     private Button stretchedButton, centerButton, applyButton;
     private boolean permissionListenerRegistered;
+    private boolean permissionRequestAttemptedThisSession;
 
     private final Shizuku.OnRequestPermissionResultListener permissionListener =
             (requestCode, grantResult) -> {
@@ -52,7 +53,25 @@ public class MainActivity extends Activity {
         refreshStatus();
     }
 
-    @Override protected void onResume() { super.onResume(); refreshStatus(); }
+    @Override protected void onResume() {
+        super.onResume();
+        refreshStatus();
+        requestShizukuPermissionOnFirstResume();
+    }
+
+    private void requestShizukuPermissionOnFirstResume() {
+        if (permissionRequestAttemptedThisSession) return;
+        permissionRequestAttemptedThisSession = true;
+        try {
+            if (Shizuku.pingBinder()
+                    && Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED
+                    && !Shizuku.shouldShowRequestPermissionRationale()) {
+                Shizuku.requestPermission(REQUEST_SHIZUKU);
+            }
+        } catch (RuntimeException e) {
+            setStatus("Could not contact Shizuku: " + safeMessage(e));
+        }
+    }
 
     @Override protected void onDestroy() {
         if (permissionListenerRegistered) {
