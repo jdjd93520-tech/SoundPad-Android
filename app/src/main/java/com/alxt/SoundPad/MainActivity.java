@@ -6,18 +6,23 @@ import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.os.Bundle;
+import android.view.View;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 import rikka.shizuku.Shizuku;
 
 public class MainActivity extends Activity {
     private static final int REQUEST_SHIZUKU = 42;
+    private static final String[] RESOLUTIONS = {"700x1360", "900x1600", "540x1080"};
     private String selectedMode = "stretched";
     private TextView statusText, displayText, modeDescription;
-    private Button stretchedButton, centerButton, applyButton;
+    private Button stretchedButton, centerButton, applyButton, previewButton;
+    private Spinner resolutionSpinner;
     private boolean permissionListenerRegistered;
     private boolean permissionRequestAttemptedThisSession;
 
@@ -98,7 +103,7 @@ public class MainActivity extends Activity {
         TextView title = label("Display Control", 29, fg, true);
         LinearLayout.LayoutParams titleLp = params(-1, -2); titleLp.topMargin = dp(5);
         root.addView(title, titleLp);
-        TextView subtitle = label("Choose how Android scales the screen.", 14, muted, false);
+        TextView subtitle = label("Choose a display mode and logical resolution.", 14, muted, false);
         LinearLayout.LayoutParams subLp = params(-1, -2); subLp.topMargin = dp(6);
         root.addView(subtitle, subLp);
 
@@ -122,7 +127,7 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams modesLp = params(-1, dp(58)); modesLp.topMargin = dp(10);
         root.addView(modes, modesLp);
         stretchedButton = modeButton("STRETCHED");
-        centerButton = modeButton("CENTER");
+        centerButton = modeButton("CENTER / NATIVE");
         LinearLayout.LayoutParams half = new LinearLayout.LayoutParams(0, -1, 1);
         half.rightMargin = dp(6); modes.addView(stretchedButton, half);
         LinearLayout.LayoutParams half2 = new LinearLayout.LayoutParams(0, -1, 1);
@@ -137,9 +142,36 @@ public class MainActivity extends Activity {
         descriptionCard.addView(modeDescription);
         selectMode("stretched");
 
-        applyButton = actionButton("APPLY SELECTED MODE", accent, Color.WHITE);
-        LinearLayout.LayoutParams applyLp = params(-1, dp(54)); applyLp.topMargin = dp(22);
-        root.addView(applyButton, applyLp);
+        TextView resolutionTitle = label("STRETCHED RESOLUTION", 12, muted, true);
+        LinearLayout.LayoutParams resolutionTitleLp = params(-1, -2);
+        resolutionTitleLp.topMargin = dp(22);
+        root.addView(resolutionTitle, resolutionTitleLp);
+
+        resolutionSpinner = new Spinner(this);
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_item, RESOLUTIONS);
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        resolutionSpinner.setAdapter(adapter);
+        resolutionSpinner.setSelection(0);
+        LinearLayout.LayoutParams spinnerLp = params(-1, dp(52));
+        spinnerLp.topMargin = dp(8);
+        root.addView(resolutionSpinner, spinnerLp);
+
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout.LayoutParams actionsLp = params(-1, dp(58));
+        actionsLp.topMargin = dp(14);
+        root.addView(actions, actionsLp);
+
+        previewButton = actionButton("PREVIEW 20 SEC", Color.rgb(48, 62, 84), fg);
+        applyButton = actionButton("APPLY", accent, Color.WHITE);
+        LinearLayout.LayoutParams previewLp = new LinearLayout.LayoutParams(0, -1, 1);
+        previewLp.rightMargin = dp(5);
+        actions.addView(previewButton, previewLp);
+        LinearLayout.LayoutParams applyLp = new LinearLayout.LayoutParams(0, -1, 1);
+        applyLp.leftMargin = dp(5);
+        actions.addView(applyButton, applyLp);
+        previewButton.setOnClickListener(v -> previewSelectedResolution());
         applyButton.setOnClickListener(v -> confirmApply());
 
         Button restore = actionButton("RESTORE ORIGINAL DISPLAY", Color.rgb(48, 62, 84), fg);
@@ -147,11 +179,11 @@ public class MainActivity extends Activity {
         root.addView(restore, restoreLp);
         restore.setOnClickListener(v -> confirmRestore());
 
-        TextView safety = label("SAFETY: Original resolution, DPI, and scaling mode are saved before changes. The app schedules an automatic restore after 10 minutes and attempts a restore when the screen turns off or after reboot. Shizuku must be running and authorized for these system commands to work.", 12, muted, false);
+        TextView safety = label("PREVIEW applies the selected resolution temporarily for 20 seconds, then attempts to restore your saved settings automatically. APPLY keeps the selected resolution active and schedules a safety restore after 10 minutes. You can restore sooner with RESTORE ORIGINAL DISPLAY. Shizuku must remain available for automatic restore.", 12, muted, false);
         LinearLayout.LayoutParams safetyLp = params(-1, -2); safetyLp.topMargin = dp(20);
         root.addView(safety, safetyLp);
 
-        TextView note = label("STRETCHED changes the logical resolution to a 16:9 landscape shape; it does not force a vendor GPU scaling mode. Some Android devices preserve aspect ratio or letterbox instead of stretching. If that happens, this phone does not expose a system-wide stretch control through these Android commands.", 12, muted, false);
+        TextView note = label("The three presets are logical display sizes. Android normally remaps touch coordinates when the display size changes, but some apps or device firmware may handle scaling differently. This app cannot guarantee identical touch behavior on every Motorola model or force the panel's hardware scaler to stretch instead of letterbox.", 12, muted, false);
         LinearLayout.LayoutParams noteLp = params(-1, -2); noteLp.topMargin = dp(12);
         root.addView(note, noteLp);
         setContentView(scroll);
@@ -162,50 +194,102 @@ public class MainActivity extends Activity {
         boolean stretched = "stretched".equals(mode);
         stretchedButton.setBackgroundColor(stretched ? Color.rgb(48, 113, 211) : Color.rgb(40, 52, 72));
         centerButton.setBackgroundColor(stretched ? Color.rgb(40, 52, 72) : Color.rgb(48, 113, 211));
+        resolutionSpinner.setEnabled(stretched);
+        previewButton.setEnabled(stretched);
         modeDescription.setText(stretched
-                ? "STRETCHED applies a 16:9 logical resolution based on your panel size. Android maps that image to the physical screen; visible edge-to-edge stretching depends on your phone."
-                : "CENTER / NATIVE restores the display resolution and scaling settings saved before the change. Android has no universal system-wide command for true GPU-style centered, unscaled output.");
+                ? "STRETCHED applies the selected logical resolution. Choose one of the presets below, preview it briefly, or apply it for up to 10 minutes before the safety restore."
+                : "CENTER / NATIVE restores the saved original resolution, DPI, and scaling settings. Android does not provide a universal system-wide GPU-style centered mode.");
     }
 
-    private void confirmApply() {
-        new AlertDialog.Builder(this).setTitle("Apply " + selectedMode.toUpperCase() + " mode?")
-                .setMessage("Your current display settings will be saved first. A safety restore is scheduled for 10 minutes. Screen-off and reboot restore attempts also require Shizuku to be available.")
-                .setNegativeButton("CANCEL", null)
-                .setPositiveButton("APPLY", (d, w) -> applySelectedMode()).show();
+    private String selectedResolution() {
+        Object value = resolutionSpinner.getSelectedItem();
+        return value == null ? RESOLUTIONS[0] : value.toString();
     }
 
-    private void applySelectedMode() {
+    private void setActionsEnabled(boolean enabled) {
+        applyButton.setEnabled(enabled);
+        previewButton.setEnabled(enabled);
+        resolutionSpinner.setEnabled(enabled && "stretched".equals(selectedMode));
+    }
+
+    private void previewSelectedResolution() {
+        if (!"stretched".equals(selectedMode)) {
+            setStatus("Select STRETCHED mode to preview a resolution.");
+            return;
+        }
         if (!hasShizukuPermission()) return;
-        applyButton.setEnabled(false);
+        final String resolution = selectedResolution();
+        new AlertDialog.Builder(this).setTitle("Preview " + resolution + "?")
+                .setMessage("This temporarily changes the logical display resolution for 20 seconds, then attempts to restore your saved original settings. If the picture or touch layout looks wrong, wait for the automatic restore.")
+                .setNegativeButton("CANCEL", null)
+                .setPositiveButton("PREVIEW", (d, w) -> runPreview(resolution)).show();
+    }
+
+    private void runPreview(String resolution) {
+        setActionsEnabled(false);
         new Thread(() -> {
             try {
-                DisplayController.applyMode(this, selectedMode);
+                DisplayController.previewResolution(this, resolution);
                 runOnUiThread(() -> {
-                    applyButton.setEnabled(true);
-                    setStatus("stretched".equals(selectedMode) ? "16:9 logical resolution applied and verified. Check whether your phone stretches it to fill the panel. Auto-restore is scheduled for 10 minutes." : "Original display configuration restored. Press RESTORE ORIGINAL DISPLAY to clear the safety timer.");
+                    setActionsEnabled(true);
+                    setStatus("Previewing " + resolution + ". Automatic restore is scheduled in 20 seconds.");
                     refreshStatus();
                 });
             } catch (Exception e) {
-                runOnUiThread(() -> { applyButton.setEnabled(true); setStatus("Apply failed: " + safeMessage(e)); });
+                runOnUiThread(() -> { setActionsEnabled(true); setStatus("Preview failed: " + safeMessage(e)); });
+            }
+        }).start();
+    }
+
+    private void confirmApply() {
+        if ("center".equals(selectedMode)) {
+            confirmRestore();
+            return;
+        }
+        final String resolution = selectedResolution();
+        new AlertDialog.Builder(this).setTitle("Apply " + resolution + "?")
+                .setMessage("Android will save your current display settings, apply this logical resolution, and schedule an automatic restore after 10 minutes. Touch coordinate behavior can vary by device.")
+                .setNegativeButton("CANCEL", null)
+                .setPositiveButton("APPLY", (d, w) -> applySelectedMode(resolution)).show();
+    }
+
+    private void applySelectedMode(String resolution) {
+        if (!hasShizukuPermission()) return;
+        setActionsEnabled(false);
+        new Thread(() -> {
+            try {
+                DisplayController.applyMode(this, selectedMode, resolution);
+                runOnUiThread(() -> {
+                    setActionsEnabled(true);
+                    setStatus("Applied " + resolution + " and verified Android's reported override. Safety restore is scheduled for 10 minutes.");
+                    refreshStatus();
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> { setActionsEnabled(true); setStatus("Apply failed: " + safeMessage(e)); });
             }
         }).start();
     }
 
     private void confirmRestore() {
         new AlertDialog.Builder(this).setTitle("Restore original display?")
-                .setMessage("This restores the resolution, DPI, and scaling mode saved before the last change.")
+                .setMessage("This restores the resolution, DPI, and scaling mode saved before the preview or apply.")
                 .setNegativeButton("CANCEL", null)
                 .setPositiveButton("RESTORE", (d, w) -> restoreNow()).show();
     }
 
     private void restoreNow() {
         if (!hasShizukuPermission()) return;
+        setActionsEnabled(false);
         new Thread(() -> {
             try {
                 DisplayController.restoreOriginal(this);
-                runOnUiThread(() -> { setStatus("Original display settings restored and verified."); refreshStatus(); });
+                runOnUiThread(() -> {
+                    setActionsEnabled(true);
+                    setStatus("Original display settings restored and verified.");
+                    refreshStatus();
+                });
             } catch (Exception e) {
-                runOnUiThread(() -> setStatus("Restore failed: " + safeMessage(e)));
+                runOnUiThread(() -> { setActionsEnabled(true); setStatus("Restore failed: " + safeMessage(e)); });
             }
         }).start();
     }
@@ -214,7 +298,7 @@ public class MainActivity extends Activity {
         if (!Shizuku.pingBinder()) { setStatus("Shizuku is not running. Start Shizuku, then try again."); return false; }
         if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
             Shizuku.requestPermission(REQUEST_SHIZUKU);
-            setStatus("Waiting for Shizuku permission. Approve the request, then apply again.");
+            setStatus("Waiting for Shizuku permission. Approve the request, then try again.");
             return false;
         }
         return true;
