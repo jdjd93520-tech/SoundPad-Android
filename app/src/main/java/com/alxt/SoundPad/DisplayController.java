@@ -16,7 +16,7 @@ final class DisplayController {
     private static final String KEY_SIZE = "original_size";
     private static final String KEY_DENSITY = "original_density";
     private static final String KEY_SCALING = "original_scaling";
-    private static final String[] ALLOWED_RESOLUTIONS = {"700x1360", "900x1600", "540x1080"};
+    private static final String[] ALLOWED_RESOLUTIONS = {"700x1360", "900x1600", "540x1080", "200x1600", "100x1080"};
 
     private DisplayController() {}
 
