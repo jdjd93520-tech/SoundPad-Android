@@ -42,10 +42,10 @@ final class DisplayController {
         saveOriginalIfNeeded(context, prefs);
         RestoreScheduler.schedule(context, 30 * 60 * 1000L);
         run("settings put system accelerometer_rotation 0");
-        run("settings put system user_rotation 1");
+        run("settings put system user_rotation " + landscapeRotation(context));
         String autoRotate = run("settings get system accelerometer_rotation");
         String userRotation = run("settings get system user_rotation");
-        if (!"0".equals(autoRotate.trim()) || !"1".equals(userRotation.trim())) {
+        if (!"0".equals(autoRotate.trim()) || !Integer.toString(landscapeRotation(context)).equals(userRotation.trim())) {
             throw new IllegalStateException("Android did not confirm the landscape rotation lock.");
         }
     }
@@ -74,13 +74,28 @@ final class DisplayController {
         if (!saved) throw new IllegalStateException("Could not save the original display settings.");
     }
 
+    private static int landscapeRotation(Context context) {
+        android.view.WindowManager wm = (android.view.WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
+        if (wm == null) return 1;
+        android.view.Display display = wm.getDefaultDisplay();
+        android.util.DisplayMetrics metrics = new android.util.DisplayMetrics();
+        display.getRealMetrics(metrics);
+        int rotation = display.getRotation();
+        boolean rotated = rotation == 1 || rotation == 3;
+        int naturalWidth = rotated ? metrics.heightPixels : metrics.widthPixels;
+        int naturalHeight = rotated ? metrics.widthPixels : metrics.heightPixels;
+        // Rotation 1 is landscape for natural-portrait devices; rotation 0 is
+        // already landscape for devices whose natural orientation is landscape.
+        return naturalWidth < naturalHeight ? 1 : 0;
+    }
+
     private static void validateResolution(String resolution) {
         Matcher matcher = Pattern.compile("^(\\d{3,4})x(\\d{3,4})$").matcher(resolution);
         if (!matcher.matches()) throw new IllegalArgumentException("Resolution format must be WIDTHxHEIGHT.");
         int width = Integer.parseInt(matcher.group(1));
         int height = Integer.parseInt(matcher.group(2));
         if (width < 320 || height < 320 || width > 8192 || height > 8192
-                || (long) width * (long) height > 20000000L || width > height) {
+                || (long) width * (long) height > 20000000L) {
             throw new IllegalArgumentException("Choose a supported landscape resolution within Android's safe size limits.");
         }
     }
@@ -99,7 +114,7 @@ final class DisplayController {
         try {
             // Temporarily lock Android to landscape while the preview is active.
             run("settings put system accelerometer_rotation 0");
-            run("settings put system user_rotation 1");
+            run("settings put system user_rotation " + landscapeRotation(context));
             // Keep Android display scaling enabled. "off" disables display scaling
             // entirely and can leave an undersized logical frame on the physical panel.
             run("wm scaling auto");
