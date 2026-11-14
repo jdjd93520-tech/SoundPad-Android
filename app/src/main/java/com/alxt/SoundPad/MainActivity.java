@@ -7,6 +7,7 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.os.Bundle;
 import android.view.View;
+import android.util.DisplayMetrics;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.LinearLayout;
@@ -15,6 +16,7 @@ import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 import rikka.shizuku.Shizuku;
+import java.util.LinkedHashSet;
 
 public class MainActivity extends Activity {
     private static final int REQUEST_SHIZUKU = 42;
@@ -117,14 +119,11 @@ public class MainActivity extends Activity {
         resolutionTitleLp.topMargin = dp(24);
         root.addView(label("FULL-PANEL / STRETCHED RESOLUTION", 12, muted, true), resolutionTitleLp);
         resolutionSpinner = new Spinner(this);
-        String[] resolutions = {"1600x718", "1440x646", "1280x574", "1024x460", "960x430", "800x360",
-                "1024x768", "1280x960", "1440x1080", "1600x1200", "1920x1440",
-                "800x600", "960x720", "800x640", "1000x800", "1280x1024", "1600x1280",
-                "1200x800", "1440x960", "1620x1080", "1920x1280", "1280x800", "1600x1000"};
+        String[] resolutions = buildResolutionOptions();
         ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, resolutions);
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         resolutionSpinner.setAdapter(adapter);
-        resolutionSpinner.setSelection(3);
+        resolutionSpinner.setSelection(resolutions.length - 1);
         LinearLayout.LayoutParams spinnerLp = params(-1, dp(54));
         spinnerLp.topMargin = dp(8);
         root.addView(resolutionSpinner, spinnerLp);
@@ -150,7 +149,7 @@ public class MainActivity extends Activity {
         TextView safety = label("The selected resolution is temporary and automatically restores after the preview. Keep Shizuku running so the restore can complete. If the display or touch layout looks wrong, use RESTORE ORIGINAL DISPLAY or wait for the timer.", 12, muted, false);
         LinearLayout.LayoutParams safetyLp = params(-1, -2); safetyLp.topMargin = dp(20);
         root.addView(safety, safetyLp);
-        TextView note = label("The first six choices are wide landscape resolutions matched to an approximately 1604x720 phone panel; choose one of these to reduce side bars. Android Auto scaling is enabled. This is the closest standard Android system-level full-panel mode, not a universal GPU warp: some games or Motorola firmware may still letterbox or keep their own aspect ratio. The 4:3 choices are included for compatibility and can show bars.", 12, muted, false);
+        TextView note = label("Choices are generated from this phone's detected physical display dimensions, so the list adapts when you move the app to another Android device. Android Auto scaling is enabled. This changes Android's logical display size; it cannot force a hardware-level stretch on every manufacturer's firmware, and individual apps may still keep their own aspect ratio.", 12, muted, false);
         LinearLayout.LayoutParams noteLp = params(-1, -2); noteLp.topMargin = dp(12);
         root.addView(note, noteLp);
         setContentView(scroll);
@@ -259,6 +258,25 @@ public class MainActivity extends Activity {
             final String s = status, d = display;
             runOnUiThread(() -> { statusText.setText(s); displayText.setText(d); });
         }).start();
+    }
+
+    private String[] buildResolutionOptions() {
+        DisplayMetrics metrics = new DisplayMetrics();
+        getWindowManager().getDefaultDisplay().getRealMetrics(metrics);
+        int longEdge = Math.max(metrics.widthPixels, metrics.heightPixels);
+        int shortEdge = Math.min(metrics.widthPixels, metrics.heightPixels);
+        if (longEdge < 320 || shortEdge < 320) {
+            longEdge = 1600;
+            shortEdge = 720;
+        }
+        LinkedHashSet<String> options = new LinkedHashSet<>();
+        double[] ratios = {4.0 / 3.0, 16.0 / 9.0, 18.0 / 9.0, 19.5 / 9.0, 20.0 / 9.0};
+        for (double ratio : ratios) {
+            int width = Math.min(longEdge, (int) Math.round(shortEdge * ratio));
+            if (width >= shortEdge) options.add(width + "x" + shortEdge);
+        }
+        options.add(longEdge + "x" + shortEdge);
+        return options.toArray(new String[0]);
     }
 
     private String selectedResolution() {
