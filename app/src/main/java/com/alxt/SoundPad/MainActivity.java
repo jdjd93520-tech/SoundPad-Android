@@ -18,7 +18,7 @@ import rikka.shizuku.Shizuku;
 
 public class MainActivity extends Activity {
     private static final int REQUEST_SHIZUKU = 42;
-    private static final String[] RESOLUTIONS = {"720x1360", "700x1360", "900x1600", "540x1080", "1024x768"};
+    private static final String[] RESOLUTIONS = {"720x1360", "700x1360", "900x1600", "540x1080", "1024x768", "900x720", "960x720", "1080x720", "1280x800"};
     private String selectedMode = "stretched";
     private TextView statusText, displayText, modeDescription;
     private Button stretchedButton, centerButton, previewButton, preview30Button;
@@ -178,7 +178,7 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams safetyLp = params(-1, -2); safetyLp.topMargin = dp(20);
         root.addView(safety, safetyLp);
 
-        TextView note = label("The five presets are logical display sizes. Android normally remaps touch coordinates when the display size changes, but some apps or device firmware may handle scaling differently. This app cannot guarantee identical touch behavior on every Motorola model or force the panel's hardware scaler to stretch instead of letterbox.", 12, muted, false);
+        TextView note = label("The nine presets are logical display sizes. Landscape previews temporarily lock Android to landscape and restore your previous rotation setting afterward. Android normally remaps touch coordinates when the display size changes, but some apps or device firmware may handle scaling differently. This app cannot guarantee identical touch behavior on every Motorola model or force the panel's hardware scaler to stretch instead of letterbox.", 12, muted, false);
         LinearLayout.LayoutParams noteLp = params(-1, -2); noteLp.topMargin = dp(12);
         root.addView(note, noteLp);
         setContentView(scroll);
