@@ -131,7 +131,7 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams stretchLp = params(-1, dp(58));
         stretchLp.topMargin = dp(14);
         root.addView(applyButton, stretchLp);
-        applyButton.setOnClickListener(v -> { String selected = selectedResolution(); if ("200x1080".equals(selected)) previewSelectedResolution(20 * 1000L, "20 seconds (experimental safety preview)"); else previewSelectedResolution(30 * 60 * 1000L, "30 minutes"); });
+        applyButton.setOnClickListener(v -> { String selected = selectedResolution(); if ("200x1080".equals(selected) || "1080x200".equals(selected)) previewSelectedResolution(20 * 1000L, "20 seconds (experimental safety preview)"); else previewSelectedResolution(30 * 60 * 1000L, "30 minutes"); });
         previewButton = actionButton("QUICK PREVIEW (20 SEC)", Color.rgb(48, 62, 84), fg);
         LinearLayout.LayoutParams previewLp = params(-1, dp(54));
         previewLp.topMargin = dp(10);
