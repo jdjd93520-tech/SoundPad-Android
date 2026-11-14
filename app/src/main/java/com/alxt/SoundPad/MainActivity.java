@@ -18,10 +18,10 @@ import rikka.shizuku.Shizuku;
 
 public class MainActivity extends Activity {
     private static final int REQUEST_SHIZUKU = 42;
-    private static final String[] RESOLUTIONS = {"720x1360", "700x1360", "900x1600", "540x1080", "1024x768", "900x720", "960x720", "1080x720", "1280x800"};
+    private static final String[] RESOLUTIONS = {"720x1360", "700x1360", "900x1600", "540x1080", "1024x768", "900x720", "960x720", "1080x720", "1280x800", "480x1280", "540x1200", "600x1280", "640x1440", "700x1500", "720x1600"};
     private String selectedMode = "stretched";
     private TextView statusText, displayText, modeDescription;
-    private Button stretchedButton, centerButton, previewButton, preview30Button;
+    private Button stretchedButton, centerButton, previewButton, preview30Button, forceLandscapeButton;
     private Spinner resolutionSpinner;
     private boolean permissionListenerRegistered;
     private boolean permissionRequestAttemptedThisSession;
@@ -142,6 +142,12 @@ public class MainActivity extends Activity {
         descriptionCard.addView(modeDescription);
         selectMode("stretched");
 
+        forceLandscapeButton = actionButton("FORCE LANDSCAPE (30 MIN)", Color.rgb(37, 118, 91), Color.WHITE);
+        LinearLayout.LayoutParams forceLandscapeLp = params(-1, dp(54));
+        forceLandscapeLp.topMargin = dp(14);
+        root.addView(forceLandscapeButton, forceLandscapeLp);
+        forceLandscapeButton.setOnClickListener(v -> forceLandscapeNow());
+
         TextView resolutionTitle = label("STRETCHED RESOLUTION", 12, muted, true);
         LinearLayout.LayoutParams resolutionTitleLp = params(-1, -2);
         resolutionTitleLp.topMargin = dp(22);
@@ -178,7 +184,7 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams safetyLp = params(-1, -2); safetyLp.topMargin = dp(20);
         root.addView(safety, safetyLp);
 
-        TextView note = label("The nine presets are logical display sizes. Landscape previews temporarily lock Android to landscape and restore your previous rotation setting afterward. Android normally remaps touch coordinates when the display size changes, but some apps or device firmware may handle scaling differently. This app cannot guarantee identical touch behavior on every Motorola model or force the panel's hardware scaler to stretch instead of letterbox.", 12, muted, false);
+        TextView note = label("Portrait-shaped presets are logical portrait dimensions; the system rotation lock turns the display coordinate space to landscape. This does not force PUBG Mobile to keep a portrait-shaped game viewport or guarantee a slow-motion effect. STRETCHED asks Android to disable aspect-preserving display scaling, which may fill the panel on supported firmware; some Motorola builds may still letterbox. Android normally remaps touch coordinates, but exact game touch behavior must be tested on-device. Force Landscape is a 30-minute system rotation lock; PUBG can still override it on some Android versions.", 12, muted, false);
         LinearLayout.LayoutParams noteLp = params(-1, -2); noteLp.topMargin = dp(12);
         root.addView(note, noteLp);
         setContentView(scroll);
@@ -205,6 +211,7 @@ public class MainActivity extends Activity {
     private void setActionsEnabled(boolean enabled) {
         previewButton.setEnabled(enabled);
         preview30Button.setEnabled(enabled && "stretched".equals(selectedMode));
+        if (forceLandscapeButton != null) forceLandscapeButton.setEnabled(enabled);
         resolutionSpinner.setEnabled(enabled && "stretched".equals(selectedMode));
     }
 
@@ -236,6 +243,31 @@ public class MainActivity extends Activity {
                 runOnUiThread(() -> { setActionsEnabled(true); setStatus("Preview failed: " + safeMessage(e)); });
             }
         }).start();
+    }
+
+    private void forceLandscapeNow() {
+        if (!hasShizukuPermission()) return;
+        new AlertDialog.Builder(this).setTitle("Force landscape for 30 minutes?")
+                .setMessage("This locks Android's user rotation to landscape and schedules restoration of your previous display and rotation settings after 30 minutes. Some games can still override the lock.")
+                .setNegativeButton("CANCEL", null)
+                .setPositiveButton("FORCE LANDSCAPE", (d, w) -> {
+                    forceLandscapeButton.setEnabled(false);
+                    new Thread(() -> {
+                        try {
+                            DisplayController.forceLandscape(this);
+                            runOnUiThread(() -> {
+                                forceLandscapeButton.setEnabled(true);
+                                setStatus("Landscape rotation lock enabled. Restore is scheduled in 30 minutes.");
+                                refreshStatus();
+                            });
+                        } catch (Exception e) {
+                            runOnUiThread(() -> {
+                                forceLandscapeButton.setEnabled(true);
+                                setStatus("Could not force landscape: " + safeMessage(e));
+                            });
+                        }
+                    }).start();
+                }).show();
     }
 
     private void confirmRestore() {
