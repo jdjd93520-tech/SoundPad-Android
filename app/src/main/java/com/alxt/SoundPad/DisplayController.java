@@ -16,7 +16,9 @@ final class DisplayController {
     private static final String KEY_SIZE = "original_size";
     private static final String KEY_DENSITY = "original_density";
     private static final String KEY_SCALING = "original_scaling";
-    private static final String[] ALLOWED_RESOLUTIONS = {"700x1360", "900x1600", "540x1080", "720x1360", "1024x768"};
+    private static final String KEY_AUTO_ROTATE = "original_auto_rotate";
+    private static final String KEY_USER_ROTATION = "original_user_rotation";
+    private static final String[] ALLOWED_RESOLUTIONS = {"700x1360", "900x1600", "540x1080", "720x1360", "1024x768", "900x720", "960x720", "1080x720", "1200x900"};
 
     private DisplayController() {}
 
@@ -51,8 +53,11 @@ final class DisplayController {
         String size = readSizeOverride(run("wm size"));
         String density = readDensityOverride(run("wm density"));
         String scaling = readScaling(run("settings get global display_scaling_force"));
+        String autoRotate = readSettingValue(run("settings get system accelerometer_rotation"), "0", "1");
+        String userRotation = readSettingValue(run("settings get system user_rotation"), "0", "1", "2", "3");
         boolean saved = prefs.edit().putString(KEY_SIZE, size).putString(KEY_DENSITY, density)
-                .putString(KEY_SCALING, scaling).putBoolean(KEY_ACTIVE, true).commit();
+                .putString(KEY_SCALING, scaling).putString(KEY_AUTO_ROTATE, autoRotate)
+                .putString(KEY_USER_ROTATION, userRotation).putBoolean(KEY_ACTIVE, true).commit();
         if (!saved) throw new IllegalStateException("Could not save the original display settings.");
     }
 
@@ -73,6 +78,9 @@ final class DisplayController {
         // Schedule the automatic rollback before changing the display.
         RestoreScheduler.schedule(context, restoreDelayMillis);
         try {
+            // Temporarily lock Android to landscape while the preview is active.
+            run("settings put system accelerometer_rotation 0");
+            run("settings put system user_rotation 1");
             run("wm size " + resolution);
             verifyResolution(resolution);
         } catch (Exception applyError) {
@@ -93,12 +101,19 @@ final class DisplayController {
         String size = prefs.getString(KEY_SIZE, null);
         String density = prefs.getString(KEY_DENSITY, null);
         String scaling = prefs.getString(KEY_SCALING, null);
+        String autoRotate = prefs.getString(KEY_AUTO_ROTATE, null);
+        String userRotation = prefs.getString(KEY_USER_ROTATION, null);
         if (size == null || density == null || scaling == null) {
             throw new IllegalStateException("No saved original display settings were found.");
         }
         restoreSize(size);
         restoreDensity(density);
         run("wm scaling " + scaling);
+        // Older saved previews may not have rotation values.
+        if (autoRotate != null && userRotation != null) {
+            run("settings put system user_rotation " + userRotation);
+            run("settings put system accelerometer_rotation " + autoRotate);
+        }
         String actualSize = readSizeOverride(run("wm size"));
         String actualDensity = readDensityOverride(run("wm density"));
         String actualScaling = readScaling(run("settings get global display_scaling_force"));
@@ -188,6 +203,12 @@ final class DisplayController {
         String found = "";
         while (m.find()) found = m.group(1);
         return found.isEmpty() ? output : found;
+    }
+
+    private static String readSettingValue(String output, String... allowed) {
+        String value = output.trim();
+        for (String candidate : allowed) if (candidate.equals(value)) return value;
+        throw new IllegalStateException("Could not read a supported Android rotation setting: " + value);
     }
 
     private static String readScaling(String output) {
