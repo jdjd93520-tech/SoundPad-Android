@@ -19,7 +19,11 @@ import rikka.shizuku.Shizuku;
 
 public class MainActivity extends Activity {
     private static final int REQUEST_SHIZUKU = 42;
-    private static final String[] IPAD_4_3 = {"800x600", "960x720", "1024x768", "1280x960", "1440x1080", "1600x1200", "1920x1440"};\n    private static final String[] CLASSIC_5_4 = {"800x640", "1000x800", "1280x1024", "1600x1280"};\n    private static final String[] DRONE_3_2 = {"1200x800", "1440x960", "1620x1080", "1920x1280"};\n    private static final String[] WIDE_16_10 = {"1280x800", "1600x1000"};\n    private static final String[] RESOLUTIONS = IPAD_4_3;
+    private static final String[] IPAD_4_3 = {"800x600", "960x720", "1024x768", "1280x960", "1440x1080", "1600x1200", "1920x1440"};
+    private static final String[] CLASSIC_5_4 = {"800x640", "1000x800", "1280x1024", "1600x1280"};
+    private static final String[] DRONE_3_2 = {"1200x800", "1440x960", "1620x1080", "1920x1280"};
+    private static final String[] WIDE_16_10 = {"1280x800", "1600x1000"};
+    private static final String[] RESOLUTIONS = IPAD_4_3;
     private String selectedMode = "stretched";
     private TextView statusText, displayText, modeDescription;
     private Button stretchedButton, centerButton, previewButton, preview30Button, forceLandscapeButton;
@@ -220,7 +224,8 @@ public class MainActivity extends Activity {
         centerButton.setBackgroundColor(stretched ? Color.rgb(40, 52, 72) : Color.rgb(48, 113, 211));
         if (resolutionSpinner != null) resolutionSpinner.setEnabled(stretched);
         if (previewButton != null) previewButton.setEnabled(stretched);
-        if (preview30Button != null) preview30Button.setEnabled(stretched);\n        if (toggleResolutionButton != null) toggleResolutionButton.setEnabled(stretched && pairPreviewCheck != null && pairPreviewCheck.isChecked());
+        if (preview30Button != null) preview30Button.setEnabled(stretched);
+        if (toggleResolutionButton != null) toggleResolutionButton.setEnabled(stretched && pairPreviewCheck != null && pairPreviewCheck.isChecked());
         modeDescription.setText(stretched
                 ? "STRETCHED applies the selected logical resolution. Choose one of the presets below and use a timed preview. The display automatically attempts to return to its saved settings when the preview ends."
                 : "CENTER / NATIVE restores the saved original resolution, DPI, and scaling settings. Android does not provide a universal system-wide GPU-style centered mode.");
@@ -277,7 +282,8 @@ public class MainActivity extends Activity {
         previewButton.setEnabled(enabled);
         preview30Button.setEnabled(enabled && "stretched".equals(selectedMode));
         if (forceLandscapeButton != null) forceLandscapeButton.setEnabled(enabled);
-        resolutionSpinner.setEnabled(enabled && "stretched".equals(selectedMode));\n        if (toggleResolutionButton != null) toggleResolutionButton.setEnabled(enabled && "stretched".equals(selectedMode) && pairPreviewCheck.isChecked());
+        resolutionSpinner.setEnabled(enabled && "stretched".equals(selectedMode));
+        if (toggleResolutionButton != null) toggleResolutionButton.setEnabled(enabled && "stretched".equals(selectedMode) && pairPreviewCheck.isChecked());
     }
 
     private void previewSelectedResolution(long durationMillis, String durationLabel) {
