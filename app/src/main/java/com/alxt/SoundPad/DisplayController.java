@@ -25,9 +25,12 @@ final class DisplayController {
             String size = readSizeOverride(run("wm size"));
             String density = readDensityOverride(run("wm density"));
             String scaling = readScaling(run("wm scaling"));
-            prefs.edit().putString(KEY_SIZE, size).putString(KEY_DENSITY, density)
-                    .putString(KEY_SCALING, scaling).apply();
+            boolean saved = prefs.edit().putString(KEY_SIZE, size).putString(KEY_DENSITY, density)
+                    .putString(KEY_SCALING, scaling).putBoolean(KEY_ACTIVE, true).commit();
+            if (!saved) throw new IllegalStateException("Could not save the original display settings.");
         }
+        // Arm recovery before changing the display, so a failed or interrupted apply still has a restore path.
+        RestoreScheduler.schedule(context);
 
         String requested = "center".equals(mode) ? "off" : "auto";
         run("wm scaling " + requested);
@@ -35,16 +38,11 @@ final class DisplayController {
         if (!requested.equals(actual)) {
             throw new IllegalStateException("Android did not confirm scaling mode '" + requested + "'. Reported: " + actual);
         }
-        prefs.edit().putBoolean(KEY_ACTIVE, true).apply();
-        RestoreScheduler.schedule(context);
     }
 
     static synchronized void restoreOriginal(Context context) throws Exception {
         requirePermission();
         SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        if (!prefs.contains(KEY_SIZE) || !prefs.getString(KEY_SIZE, null) == null) {
-            // The detailed validation below handles missing values without silently guessing.
-        }
         String size = prefs.getString(KEY_SIZE, null);
         String density = prefs.getString(KEY_DENSITY, null);
         String scaling = prefs.getString(KEY_SCALING, null);
@@ -63,7 +61,7 @@ final class DisplayController {
             throw new IllegalStateException("Restore verification failed. Current: size=" + actualSize
                     + ", density=" + actualDensity + ", scaling=" + actualScaling);
         }
-        prefs.edit().putBoolean(KEY_ACTIVE, false).remove("last_restore_error").apply();
+        prefs.edit().putBoolean(KEY_ACTIVE, false).remove("last_restore_error").commit();
         RestoreScheduler.cancel(context);
     }
 
