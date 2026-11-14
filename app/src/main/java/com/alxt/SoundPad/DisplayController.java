@@ -95,9 +95,9 @@ final class DisplayController {
             // Temporarily lock Android to landscape while the preview is active.
             run("settings put system accelerometer_rotation 0");
             run("settings put system user_rotation 1");
-            // Disable aspect-preserving compatibility scaling so the logical frame is
-            // mapped edge-to-edge where the device compositor supports this mode.
-            run("wm scaling off");
+            // Keep Android display scaling enabled. "off" disables display scaling
+            // entirely and can leave an undersized logical frame on the physical panel.
+            run("wm scaling auto");
             run("wm size " + resolution);
             verifyResolution(resolution);
         } catch (Exception applyError) {
