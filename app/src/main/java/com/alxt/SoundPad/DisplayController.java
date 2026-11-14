@@ -40,13 +40,20 @@ final class DisplayController {
     }
 
     static synchronized void previewResolution(Context context, String resolution) throws Exception {
+        previewResolution(context, resolution, 20 * 1000L);
+    }
+
+    static synchronized void previewResolution(Context context, String resolution, long durationMillis) throws Exception {
         requirePermission();
         validateResolution(resolution);
+        if (durationMillis != 20 * 1000L && durationMillis != 30 * 60 * 1000L) {
+            throw new IllegalArgumentException("Unsupported preview duration.");
+        }
         SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         saveOriginalIfNeeded(context, prefs);
         run("wm size " + resolution);
         verifyResolution(resolution);
-        RestoreScheduler.schedule(context, 20 * 1000L);
+        RestoreScheduler.schedule(context, durationMillis);
     }
 
     static synchronized void restoreOriginal(Context context) throws Exception {
