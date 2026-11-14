@@ -27,6 +27,9 @@ public class MainActivity extends Activity {
     private String selectedMode = "stretched";
     private TextView statusText, displayText, modeDescription;
     private Button stretchedButton, centerButton, previewButton, preview30Button, forceLandscapeButton;
+    private CheckBox pairPreviewCheck;
+    private Button toggleResolutionButton;
+    private boolean showingResolutionA = true;
     private Spinner resolutionSpinner;
     private boolean permissionListenerRegistered;
     private boolean permissionRequestAttemptedThisSession;
