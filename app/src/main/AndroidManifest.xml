@@ -6,6 +6,9 @@
         android:allowBackup="false"
         android:label="Display Launcher"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <meta-data
+            android:name="moe.shizuku.client.V3_SUPPORT"
+            android:value="true" />
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -23,6 +26,7 @@
             android:name="rikka.shizuku.ShizukuProvider"
             android:authorities="${applicationId}.shizuku"
             android:multiprocess="false"
+            android:enabled="true"
             android:permission="android.permission.INTERACT_ACROSS_USERS_FULL"
             android:exported="true" />
     </application>
